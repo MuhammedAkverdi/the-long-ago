@@ -6,7 +6,7 @@ import pathlib
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from . import images
-from .config import CFG
+from .config import CFG, log
 
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
@@ -64,9 +64,17 @@ def overlay(base: Image.Image, text: str, out: pathlib.Path, darken: float = 1.0
     return out
 
 
-def make(prompt: str, text: str, folder: pathlib.Path) -> pathlib.Path:
-    raw = images.generate(prompt + ". Single clear focal subject on the right half, empty darker space on the left.",
-                          folder / "thumb_raw.png", providers=CFG["images"].get("thumbnail_providers"))
+def raw_image(prompt: str, folder: pathlib.Path) -> pathlib.Path | None:
+    """The thumbnail's base picture (cached in the folder, so calling it twice costs one image)."""
+    return images.generate(prompt + ". Single clear focal subject on the right half, empty darker space on the left.",
+                           folder / "thumb_raw.png", providers=CFG["images"].get("thumbnail_providers"))
+
+
+def make(prompt: str, text: str, folder: pathlib.Path, fallback: pathlib.Path | None = None) -> pathlib.Path:
+    raw = raw_image(prompt, folder)
     if raw is None:
-        raise RuntimeError("thumbnail image generation failed")
+        if fallback is None:
+            raise RuntimeError("thumbnail image generation failed")
+        log("thumbnail image generation failed; using an episode image instead")
+        raw = fallback
     return overlay(Image.open(raw), text, folder / "thumbnail.jpg")

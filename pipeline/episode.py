@@ -40,7 +40,7 @@ def _segments(chapter_imgs: list[list[pathlib.Path]], starts: list[float], durs:
     return segs
 
 
-def make_short(short: dict, idx: int, folder: pathlib.Path) -> dict:
+def make_short(short: dict, idx: int, folder: pathlib.Path, fallback: list[pathlib.Path] | None = None) -> dict:
     sdir = folder / f"short{idx}"
     sdir.mkdir(parents=True, exist_ok=True)
     wav = tts.synthesize(short["narration"], sdir / "voice.wav")
@@ -52,7 +52,7 @@ def make_short(short: dict, idx: int, folder: pathlib.Path) -> dict:
         wav, d = fast, duration(fast)
     d = min(d, 170.0)
     prompts = short.get("image_prompts") or ["an ordinary household scene"]
-    imgs = images.generate_many([str(p) for p in prompts][:6], sdir / "img", aspect="9:16")
+    imgs = images.generate_many([str(p) for p in prompts][:6], sdir / "img", aspect="9:16", fallback=fallback)
     step = d / len(imgs)
     segs = [(img, k * step, d if k == len(imgs) - 1 else (k + 1) * step) for k, img in enumerate(imgs)]
     silent = sdir / "silent.mp4"
@@ -87,6 +87,9 @@ def produce(topic: str, recent_structures: list[str]) -> dict:
     starts, durs = render.assemble_narration(wavs, narration)
     total = duration(narration)
 
+    log("thumbnail")  # made before the chapter images so it gets the day's image allowance first
+    thumbnail.raw_image(script["thumbnail_prompt"], folder)
+
     log("images")
     chapter_imgs = []
     for i, c in enumerate(script["chapters"]):
@@ -107,7 +110,9 @@ def produce(topic: str, recent_structures: list[str]) -> dict:
         cues += render.cues_for(c["narration"], s, d)
     render.write_srt(cues, folder / "captions.srt")
 
-    thumbnail.make(script["thumbnail_prompt"], script["thumbnail_text"], folder)
+    all_imgs = [p for imgs in chapter_imgs for p in imgs]
+    thumbnail.make(script["thumbnail_prompt"], script["thumbnail_text"], folder,
+                   fallback=all_imgs[0] if all_imgs else None)
     description = build_description(script, starts)
     (folder / "metadata.md").write_text(
         f"# {script['title']}\n\n## Description\n\n{description}\n\n## Tags\n\n{', '.join(script['tags'])}\n",
@@ -116,7 +121,7 @@ def produce(topic: str, recent_structures: list[str]) -> dict:
     shorts = []
     for i, s in enumerate(script.get("shorts", [])):
         try:
-            shorts.append(make_short(s, i, folder))
+            shorts.append(make_short(s, i, folder, fallback=all_imgs[i::max(1, len(script["shorts"]))][:6] or None))
         except Exception as exc:  # noqa: BLE001 - a broken Short must not kill the episode
             log(f"short {i} failed: {exc}")
 

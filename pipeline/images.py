@@ -49,8 +49,10 @@ def _cloudflare(prompt: str, aspect: str) -> bytes:
             if r.status_code == 400:  # size not accepted -> plain prompt (we crop afterwards)
                 r = requests.post(url, headers=headers, files={"prompt": (None, text)}, timeout=180)
         else:
-            r = requests.post(url, headers=headers, timeout=120,
-                              json={"prompt": text, "num_steps": int(CFG["images"]["cloudflare_steps"])})
+            body = {"prompt": text, "steps": int(CFG["images"]["cloudflare_steps"])}
+            r = requests.post(url, headers=headers, timeout=120, json=body)
+            if r.status_code == 400 and "properties" in r.text:  # schema changed: send the prompt alone
+                r = requests.post(url, headers=headers, timeout=120, json={"prompt": text})
         if r.status_code == 429 or (r.status_code >= 400 and "neuron" in r.text.lower()):
             log(f"{model}: daily allowance used up, switching model")
             _disabled.add(model)
@@ -148,8 +150,11 @@ def generate(prompt: str, out: pathlib.Path, aspect: str = "16:9", providers: li
     return None
 
 
-def generate_many(prompts: list[str], folder: pathlib.Path, aspect: str = "16:9") -> list[pathlib.Path]:
-    """Generate images in order; failed slots reuse the previous (or next) good image."""
+def generate_many(prompts: list[str], folder: pathlib.Path, aspect: str = "16:9",
+                  fallback: list[pathlib.Path] | None = None) -> list[pathlib.Path]:
+    """Generate images in order; failed slots reuse the previous (or next) good image.
+
+    With `fallback`, a run that cannot make enough new images reuses those instead of failing."""
     results: list[pathlib.Path | None] = []
     redraws_left = int(len(prompts) * CFG["images"].get("max_redraw_ratio", 0.2)) + 1
     for i, p in enumerate(prompts):
@@ -163,6 +168,9 @@ def generate_many(prompts: list[str], folder: pathlib.Path, aspect: str = "16:9"
         if (i + 1) % 10 == 0:
             log(f"images: {i + 1}/{len(prompts)}")
     good = [r for r in results if r]
+    if len(good) < 0.75 * len(results) and fallback:
+        log(f"only {len(good)}/{len(results)} new images; reusing episode images")
+        return [r or fallback[i % len(fallback)] for i, r in enumerate(results)]
     if len(good) < 0.75 * len(results):  # too many gaps would look cheap: fail now, retry on a later run
         raise RuntimeError(f"only {len(good)}/{len(results)} images could be generated")
     filled, last = [], None
