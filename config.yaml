@@ -1,0 +1,89 @@
+# The Long Ago — üretim hattı ayarları
+# (Bu dosyayı değiştirmek için teknik bilgi gerekmez; yorum satırları açıklıyor.)
+
+channel:
+  name: "The Long Ago"
+  handle: "@TheLongAgo2"
+  language: "en"
+  timezone: "Europe/Istanbul"
+  category_id: "27"            # 27 = Education
+  # "api"    : videolar YouTube'a otomatik yüklenir ve zamanlanır (YouTube API denetimi onaylandıktan sonra).
+  # "manual" : videolar GitHub "Release" sayfasında birikir; api'ye geçilince otomatik yüklenir.
+  # GitHub'da depo değişkeni UPLOAD_MODE=api tanımlanırsa bu ayarı ezer (telefondan 1 dakikada değiştirilir).
+  upload_mode: "manual"
+  # Ana videoların yayın saatleri (yerel saat). weekday: 0=Pazartesi ... 6=Pazar
+  publish_slots:
+    - {weekday: 2, time: "17:00"}   # Çarşamba
+    - {weekday: 5, time: "17:00"}   # Cumartesi
+  shorts_slots:
+    - {weekday: 1, time: "15:00"}   # Salı
+    - {weekday: 4, time: "15:00"}   # Cuma
+    - {weekday: 6, time: "15:00"}   # Pazar
+  default_tags: ["history", "daily life in history", "history documentary", "medieval life", "ancient history", "sleep history"]
+
+# Her rol için sırayla denenen modeller. Biri kapanırsa/kotası biterse sıradakine geçilir.
+# "auto" = Google'ın o an sunduğu en yeni uygun Flash modelini kendisi bulur (modeller 9 ayda değişebilir).
+# Ücretsiz katman: gemini-3.8-flash (~20 istek/gün), gemini-3.5-flash-lite (~500 istek/gün).
+# Google AI Pro kredisi açılırsa writer listesinin başına "gemini-4-argon" eklenebilir.
+models:
+  writer: ["gemini-3.8-flash", "gemini-3.6-flash", "auto", "gemini-3.5-flash-lite"]
+  researcher: ["gemini-3.8-flash", "auto", "gemini-3.5-flash-lite"]
+  light: ["gemini-3.5-flash-lite", "auto"]     # küçük düzeltmeler (kotayı korumak için)
+  qc: ["gemini-3.5-flash-lite"]                # görsel kalite kontrolü (yüksek kotalı model)
+  image: ["gemini-3.1-flash-image"]           # sadece images.providers içinde "gemini" varsa (ücretli)
+  tts: ["gemini-3.8-flash-tts"]               # sadece voice.provider = gemini ise
+
+images:
+  # Sırayla denenir. cloudflare = FLUX (günlük ücretsiz kota), gemini = Nano Banana (ücretli/AI Pro kredisi).
+  providers: ["cloudflare", "gemini"]
+  thumbnail_providers: ["gemini", "cloudflare"]   # kapak en önemli görsel: önce en kalitelisi denenir
+  cloudflare_models:
+    - "@cf/black-forest-labs/flux-2-klein-4b"    # yeni nesil, daha kaliteli (~95 görsel/gün ücretsiz)
+    - "@cf/black-forest-labs/flux-1-schnell"     # yedek (~170 görsel/gün)
+  cloudflare_steps: 4
+  quality_check: true      # her görseli Gemini'ye gösterip bozuk el/yüz/yazı/modern nesne varsa yeniden çizer
+  max_redraw_ratio: 0.2
+
+approval:
+  auto_approve_hours: 48          # bu süre içinde /iptal yazılmazsa video kendiliğinden onaylanır
+
+voice:
+  provider: "kokoro"                # "kokoro" (ücretsiz, GitHub'da çalışır), "gemini" ya da "elevenlabs" (ücretli)
+  kokoro_voice: "bm_george"         # İngiliz erkek anlatıcı
+  kokoro_lang: "b"                  # b = British English
+  kokoro_speed: 0.92
+  elevenlabs_voice_id: "lo1O1Dz1Tu4FWVEPaxuT"   # Oliver - Warm British Narrator
+  elevenlabs_model: "eleven_multilingual_v2"
+  stability: 0.55
+  similarity_boost: 0.75
+  style: 0.1
+  gemini_voice: "Charon"
+
+script:
+  target_minutes: 25
+  words_per_minute: 140
+  chapters: [7, 9]                  # en az / en fazla bölüm
+  shorts_per_episode: 2
+  topics_per_week: 6
+  episodes_per_week: 2
+
+video:
+  width: 1920
+  height: 1080
+  fps: 25
+  seconds_per_image: 19
+  zoom_supersample: 2
+  crossfade: 0.8                    # sahne geçişi (saniye)
+  grain: 3                          # film dokusu (0 = kapalı)
+  chapter_titles: true
+  crf: 23
+  maxrate: "6M"
+  music_volume: 0.07                # assets/music içine telifsiz müzik koyarsanız kullanılır
+  image_style: >-
+    painterly historical illustration, soft oil painting, muted warm earth palette,
+    gentle candle or daylight, cinematic composition, detailed everyday objects,
+    no text, no letters, no watermark, not photorealistic
+
+compilation:
+  min_episodes: 3
+  target_minutes: 150

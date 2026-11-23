@@ -1,0 +1,77 @@
+name: 3 - Onay / iptal
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: write
+  issues: write
+jobs:
+  run:
+    if: >-
+      contains(github.event.issue.labels.*.name, 'onay-bekliyor') &&
+      github.event.comment.author_association == 'OWNER' &&
+      (startsWith(github.event.comment.body, '/onay') || startsWith(github.event.comment.body, '/iptal'))
+    concurrency:
+      group: review-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          grep -vE '^(kokoro|soundfile)' requirements.txt > "$RUNNER_TEMP/req.txt"
+          pip install -q -r "$RUNNER_TEMP/req.txt"
+          cp state/state.json "$RUNNER_TEMP/base.json"
+      - name: Run
+        run: python -m pipeline review --issue "$ISSUE" --command "$COMMAND"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          UPLOAD_MODE: ${{ vars.UPLOAD_MODE }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          COMMAND: ${{ github.event.comment.body }}
+      - name: Save state (3-way merge, safe with parallel runs)
+        if: always()
+        env:
+          BR: ${{ github.event.repository.default_branch }}
+        run: |
+          cmp -s state/state.json "$RUNNER_TEMP/base.json" && exit 0
+          cp state/state.json "$RUNNER_TEMP/mine.json"
+          git config user.name "the-long-ago-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5; do
+            git fetch -q origin "$BR"
+            git reset -q --hard "origin/$BR"
+            python -m pipeline merge-state "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/mine.json" state/state.json > "$RUNNER_TEMP/merged.json"
+            cp "$RUNNER_TEMP/merged.json" state/state.json
+            git add state/state.json
+            git diff --cached --quiet && exit 0
+            git commit -q -m "state: ${{ github.workflow }} #${{ github.run_id }}"
+            git push -q origin "HEAD:$BR" && exit 0
+            sleep $((i * 7))
+          done
+          exit 1
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create hata --color b60205 --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --label hata \
+            --title "⚠️ Otomatik çalışma hata verdi: ${{ github.workflow }}" \
+            --body "Çalışma kaydı: $URL — Sistem bir sonraki çalışmada kendiliğinden tekrar dener."
