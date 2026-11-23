@@ -24,7 +24,7 @@ def build_description(script: dict, chapter_starts: list[float]) -> str:
     parts += [f"{ts(0 if i == 0 else t)} {c['heading']}" for i, (c, t) in enumerate(zip(script["chapters"], chapter_starts))]
     if script.get("sources"):
         parts += ["", "Sources and further reading:"]
-        parts += [f"- {s['title']}: {s['url']}" for s in script["sources"]]
+        parts += [f"- {s['title']}" + (f": {s['url']}" if s.get("url") else "") for s in script["sources"]]
     parts += ["", AI_NOTE, "", "#history #dailylife #thelongago"]
     return "\n".join(parts)
 

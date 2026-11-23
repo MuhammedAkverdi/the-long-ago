@@ -192,7 +192,20 @@ numbers or sources."""
             raise RuntimeError("empty research")
         return resp
 
-    resp = with_models("researcher", call, "gemini research")
+    try:
+        resp = with_models("researcher", call, "gemini research")
+    except RuntimeError as exc:
+        # Google Search grounding is not always available on the free tier: research from model knowledge
+        log(f"grounded research unavailable ({str(exc)[:120]}); using ungrounded research")
+        text = generate_text(prompt + """
+
+End with a line "SOURCES:" followed by 5-8 lines, each one real, well-known scholarly book or
+article on this subject in the form "Author, Title (Year)". Only list works you are certain exist.""",
+                             role="researcher", temperature=0.3)
+        notes, _, tail = text.partition("SOURCES:")
+        books = [ln.strip(" -*\t") for ln in tail.splitlines() if ln.strip(" -*\t")][:8]
+        log(f"research: {len(notes)} chars, {len(books)} reading-list entries (ungrounded)")
+        return notes.strip(), [{"title": b[:160], "url": ""} for b in books]
     sources: list[dict] = []
     seen = set()
     try:
