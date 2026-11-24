@@ -82,7 +82,8 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
         write_json(script_path, script)
 
     remote = None
-    if colab.offer(folder, slug, script) and colab.pending_paths(folder):  # Colab draws while narration is voiced
+    if (colab.offer(folder, slug, script) and colab.pending_paths(folder)
+            and "images.zip" not in colab._assets(f"colab-{slug}")):  # Colab draws while narration is voiced
         remote = colab_remote.start()  # headless Colab via the Colab API, when its secrets are set
     try:
         return _produce_rest(topic, script, folder, slug, w, h, remote)
