@@ -1,7 +1,7 @@
 name: 2 - Bölüm üret
 on:
   schedule:
-    - cron: "0 4 * * *"   # new episodes Tue/Thu; other days only continue one paused by the image allowance
+    - cron: "30 8 * * *"  # 11:30 TR, after both free quotas reset (Cloudflare 00:00 UTC, Gemini midnight Pacific). New episodes Tue/Thu; other days only continue a paused one
   workflow_dispatch:
 permissions:
   contents: write

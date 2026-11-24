@@ -6,6 +6,8 @@ so the channel keeps working when Google renames or retires models.
 """
 from __future__ import annotations
 
+import time
+
 import json
 import re
 
@@ -75,22 +77,41 @@ def _is_quota_or_gone(exc: Exception) -> bool:
             or "quota" in text or "unavailable" in text)
 
 
+class LLMUnavailable(RuntimeError):
+    """Every model of a role is out of quota or overloaded: the work so far is kept for a later run."""
+
+
 def with_models(role: str, fn, what: str):
-    """Call fn(model) with retries, moving down the role's model list on permanent/quota errors."""
-    last = None
-    for model in candidates(role):
-        try:
-            return retry(lambda m=model: fn(m), tries=4, base=8.0, what=f"{what} [{model}]")
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if _is_quota_or_gone(exc):
-                code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-                text = str(exc).lower()
-                if code in (400, 403, 404) or "per day" in text or "perday" in text or "daily" in text:
-                    _dead.add(model)  # gone or out of daily quota: skip it for the rest of this run
-                log(f"model {model} unavailable ({str(exc)[:160]}); trying next")
-                continue
-            raise
+    """Call fn(model) with retries, moving down the role's model list on permanent/quota errors.
+
+    If every model fails only from quota/overload, wait once and try the remaining ones again,
+    then raise LLMUnavailable (the caller pauses instead of losing the episode)."""
+    last, transient = None, False
+    rounds = 1 if what in ("gemini vision", "gemini research") else 2  # QC and grounding have cheap fallbacks
+    for round_ in range(rounds):
+        if round_:
+            if not candidates(role):
+                break
+            log(f"all '{role}' models busy; waiting 120s before one more round")
+            time.sleep(120)
+        for model in candidates(role):
+            try:
+                return retry(lambda m=model: fn(m), tries=4, base=8.0, what=f"{what} [{model}]")
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if _is_quota_or_gone(exc):
+                    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                    text = str(exc).lower()
+                    if code in (429, 500, 503, 504) or "resource_exhausted" in text or "unavailable" in text:
+                        transient = True
+                    gone = code in (400, 403, 404) or "per day" in text or "perday" in text or "daily" in text
+                    if gone and what != "gemini research":  # a grounding refusal must not kill the model for plain text
+                        _dead.add(model)  # gone or out of daily quota: skip it for the rest of this run
+                    log(f"model {model} unavailable ({str(exc)[:160]}); trying next")
+                    continue
+                raise
+    if transient:  # quota/overload only: worth pausing and trying again tomorrow
+        raise LLMUnavailable(f"no working model for '{role}': {last}")
     raise RuntimeError(f"no working model for '{role}': {last}")
 
 

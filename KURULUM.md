@@ -9,7 +9,7 @@ Hepsi **ücretsiz** servislerle çalışır.
 | Ne zaman (Türkiye saati) | Ne olur? | Sizin işiniz |
 |---|---|---|
 | Pazartesi 08:00 | 6 konu önerilir (GitHub'da "issue" olarak) | İsterseniz 2 tanesini işaretleyin. Yapmazsanız ertesi sabah sistem kendisi seçer. |
-| Salı ve Perşembe 07:00 | Bölüm + 2 Shorts hazırlanır | Yok |
+| Salı ve Perşembe 11:30 | Bölüm + 2 Shorts hazırlanmaya başlar (ücretsiz kota biterse ertesi gün devam eder) | Yok |
 | Video hazır olunca | Telefonunuza "🎬 Onay bekliyor" bildirimi gelir | **Hiçbir şey.** 48 saat içinde `/iptal` yazmazsanız kendiliğinden onaylanır. |
 | Her gün 09:30 | Onaylanan video YouTube'a yüklenir ve zamanlanır | Yok |
 | Ayın 3'ü | 2-3 saatlik uyku derlemesi hazırlanır | Yok |

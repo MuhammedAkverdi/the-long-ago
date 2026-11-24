@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from . import github, images, thumbnail, youtube
 from .config import CFG, MOCK, WORK, duration, env, load_state, log, read_json, run, save_state, upload_mode, write_json
 from .episode import AI_NOTE, produce, ts, upload_all
+from .llm import LLMUnavailable
 from .topics import propose
 
 TOPIC_LABEL, REVIEW_LABEL = "konu-secimi", "onay-bekliyor"
@@ -208,7 +209,7 @@ def cmd_produce(_args) -> None:
     save_state(state)
     try:
         record = produce(t["title"], state["recent_structures"], slug=t["work_slug"])
-    except images.QuotaPause as exc:
+    except (images.QuotaPause, LLMUnavailable) as exc:
         state = load_state()
         t = state["topics"][tid]
         t["pauses"] = t.get("pauses", 0) + 1

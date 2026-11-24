@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import random
 import re
 
@@ -56,16 +57,35 @@ def _mock_script(topic: str, structure: str) -> dict:
     }
 
 
-def build(topic: str, structure: str) -> dict:
+def _step(cache, name: str, fn):
+    """Run one script step once: its result is saved, so a resumed run skips finished steps."""
+    path = cache / f"{name}.json" if cache else None
+    if path and path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    value = fn()
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)  # atomic: a job killed mid-write never leaves a broken step file
+    return value
+
+
+def build(topic: str, structure: str, cache: pathlib.Path | None = None) -> dict:
     if MOCK:
         return _mock_script(topic, structure)
+    if cache and (cache / "structure.json").exists():  # a resumed episode keeps its first structure
+        structure = json.loads((cache / "structure.json").read_text(encoding="utf-8"))
+    elif cache:
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "structure.json").write_text(json.dumps(structure), encoding="utf-8")
     sc = CFG["script"]
     total_words = int(sc["target_minutes"] * sc["words_per_minute"])
     lo, hi = sc["chapters"]
     words_per_image = max(20, int(sc["words_per_minute"] * CFG["video"]["seconds_per_image"] / 60))
 
     log(f"researching: {topic}")
-    notes, sources = research(topic)
+    notes, sources = _step(cache, "research", lambda: list(research(topic)))
 
     log(f"outlining with structure '{structure}'")
 
@@ -82,7 +102,7 @@ def build(topic: str, structure: str) -> dict:
             m = re.search(r"\d+", str(c.get("words", "")))
             c["words"] = int(m.group(0)) if m else 0
 
-    outline = generate_json(f"""Episode topic: {topic}
+    outline = _step(cache, "outline", lambda: generate_json(f"""Episode topic: {topic}
 Narrative structure: {STRUCTURES[structure]}
 Total narration length: about {total_words} words, split into {lo}-{hi} chapters.
 The first chapter must open with a 2-3 sentence hook that makes the viewer curious,
@@ -96,7 +116,7 @@ Research notes (only use facts supported here or that are widely established):
 
 Return JSON: {{"chapters": [{{"heading": "short chapter title (for YouTube chapters)",
 "beats": ["3-6 specific points this chapter covers"], "words": integer}}]}}""",
-                            system=SYSTEM, validate=check_outline)
+                            system=SYSTEM, validate=check_outline))
 
     chapters = []
     previous_tail = ""
@@ -111,7 +131,8 @@ Return JSON: {{"chapters": [{{"heading": "short chapter title (for YouTube chapt
             if len(o.get("image_prompts", [])) < max(2, n_images // 2):
                 raise ValueError("too few image prompts")
 
-        out = generate_json(f"""Write chapter {i + 1} of {len(outline['chapters'])} of the episode "{topic}".
+        out = _step(cache, f"chapter{i:02d}", lambda i=i, ch=ch, words=words, n_images=n_images,
+                    previous_tail=previous_tail, check_chapter=check_chapter: generate_json(f"""Write chapter {i + 1} of {len(outline['chapters'])} of the episode "{topic}".
 Chapter title: {ch['heading']}
 Beats to cover: {'; '.join(ch['beats'])}
 Length: about {words} words of narration.
@@ -131,13 +152,13 @@ time of day) that matches what is being said at that moment. Ordinary anonymous 
 only, never a real historical person's face. Period-accurate clothing and architecture.
 
 Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
-                            system=SYSTEM, validate=check_chapter)
+                            system=SYSTEM, validate=check_chapter))
         chapters.append({"heading": ch["heading"].strip(), "narration": out["narration"].strip(),
                          "image_prompts": [str(p) for p in out["image_prompts"]]})
         previous_tail = " ".join(out["narration"].split()[-40:])
 
     try:
-        chapters, n_issues = fact_check(topic, notes, chapters)
+        chapters, n_issues = _step(cache, "factcheck", lambda: list(fact_check(topic, notes, chapters)))
         fact_status = f"{n_issues} düzeltme uygulandı"
     except Exception as exc:  # noqa: BLE001 - never lose a whole episode to the checker
         log(f"fact check failed, continuing without it: {exc}")
@@ -153,7 +174,7 @@ Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
         if len(o["title"]) > 100:
             raise ValueError("title too long")
 
-    meta = generate_json(f"""Here is the narration of a documentary episode about "{topic}":
+    meta = _step(cache, "meta", lambda: generate_json(f"""Here is the narration of a documentary episode about "{topic}":
 <<<
 {full_text[:30000]}
 >>>
@@ -169,7 +190,7 @@ Create YouTube packaging. Return JSON with:
 "shorts": {sc['shorts_per_episode']} objects {{"title": "<70 chars, ends with #shorts",
   "narration": "a self-contained 90-120 word story taken from the most surprising facts in the
   episode, starting with a strong first sentence", "image_prompts": [4 vertical scene prompts]}}""",
-                         system=SYSTEM, validate=check_meta)
+                         system=SYSTEM, validate=check_meta))
 
     return {
         "topic": topic, "structure": structure, "title": meta["title"].strip(),

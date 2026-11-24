@@ -78,7 +78,7 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
     if script_path.exists():
         script = read_json(script_path)
     else:
-        script = build(topic, pick_structure(recent_structures))
+        script = build(topic, pick_structure(recent_structures), cache=folder / "steps")
         write_json(script_path, script)
 
     log("narration")
