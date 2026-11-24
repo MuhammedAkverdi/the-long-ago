@@ -124,7 +124,9 @@ def review_body(record: dict, release_url: str) -> str:
              f"Süre: **{record['minutes']} dk** · Anlatı yapısı: `{record.get('structure', '-')}` · Shorts: {len(record.get('shorts', []))}",
              f"Doğruluk kontrolü: {record.get('fact_check', '-')}", "",
              f"İzlemek için (telefondan da açılır): {release_url}", "",
-             f"**Hiçbir şey yapmazsanız {hours} saat sonra otomatik onaylanır ve yayın takvimine girer.**",
+             (f"**Doğruluk kontrolü çalışmadığı için bu video otomatik onaylanmaz; `/onay` yazmanız gerekir.**"
+              if str(record.get("fact_check", "")).startswith("ÇALIŞMADI") else
+              f"**Hiçbir şey yapmazsanız {hours} saat sonra otomatik onaylanır ve yayın takvimine girer.**"),
              "- Hemen onaylamak için yoruma `/onay` yazın", "- Yayınlanmasın derseniz `/iptal` yazın", "",
              "Kontrol listesi: tarihî bir hata var mı? Görsellerde garip el/yüz/yazı var mı? Ses düzgün mü?"]
     if not api_mode():
@@ -366,6 +368,16 @@ def cmd_auto_approve(_args) -> None:
             if _owner_cancelled(rec["review_issue"]):  # a /iptal whose run was dropped
                 reject(rec, rec["review_issue"])
                 continue
+            if not rec.get("approve_requested") and str(rec.get("fact_check", "")).startswith("ÇALIŞMADI"):
+                # never publish an unchecked script without a human look: wait for /onay or /iptal
+                if not rec.get("manual_review_noted"):
+                    github.comment(rec["review_issue"], "⚠️ Bu bölümün doğruluk kontrolü çalışmadığı için otomatik "
+                                   "onaylanmayacak. İzleyip uygunsa `/onay`, değilse `/iptal` yazın.")
+                    rec["manual_review_noted"] = True
+                    st = load_state()
+                    st["episodes"][rec["slug"]] = rec
+                    save_state(st)
+                continue
             approve(rec, rec["review_issue"], auto=not rec.get("approve_requested"))
             return
     # finish thumbnails/captions that failed earlier (e.g. quota)
@@ -539,6 +551,61 @@ def cmd_check(_args) -> None:
         sys.exit("Some checks failed")
 
 
+def _notice(title: str, body: str) -> None:
+    """One open issue per kind of warning: repeat warnings become comments, not new issues."""
+    github.ensure_label("uyari", "fbca04")
+    for issue in github.open_issues("uyari"):
+        if issue.get("title") == title:
+            github.comment(issue["number"], body)
+            return
+    github.create_issue(title, body, ["uyari"])
+
+
+def cmd_health(_args) -> None:
+    """Weekly, cheap: keeps the YouTube login alive and warns early when a key or setting needs the owner.
+
+    Google revokes a refresh token that is not used for 6 months, so a weekly refresh also keeps it valid
+    while uploads wait for the API audit."""
+    import requests
+    from .llm import generate_text
+    problems: list[str] = []
+    if env("YT_REFRESH_TOKEN", required=False):
+        try:
+            ch = youtube.service().channels().list(part="snippet,status", mine=True).execute()
+            log(f"OK   YouTube: {ch['items'][0]['snippet']['title']}")
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"YouTube bağlantısı çalışmıyor (yeni refresh token gerekebilir, KURULUM.md Adım 5.5): {str(exc)[:200]}")
+    else:
+        problems.append("YT_REFRESH_TOKEN secret'ı yok.")
+    try:
+        generate_text("Reply with the single word: ready", role="light", temperature=0)
+        log("OK   Gemini")
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"Gemini anahtarı/kotası çalışmıyor: {str(exc)[:200]}")
+    try:
+        r = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify",
+                         headers={"Authorization": f"Bearer {env('CLOUDFLARE_API_TOKEN')}"}, timeout=30)
+        good = r.ok and r.json().get("result", {}).get("status") == "active"
+        if not good:
+            problems.append(f"Cloudflare token geçersiz veya süresi dolmuş: {r.text[:200]}")
+        else:
+            log("OK   Cloudflare")
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"Cloudflare'e ulaşılamadı: {str(exc)[:200]}")
+
+    state = load_state()
+    waiting = [r for r in state["episodes"].values()
+               if r.get("status") in ("produced", "uploaded") and r.get("review_issue")]
+    if not api_mode() and len(waiting) >= 2:
+        _notice("📦 Videolar birikiyor: YouTube yüklemesi kapalı",
+                f"{len(waiting)} video hazır ama YouTube'a yüklenmiyor çünkü `UPLOAD_MODE` henüz `api` değil. "
+                "Google'dan YouTube API denetimi onay e-postası geldiyse: Settings → Secrets and variables → "
+                "Actions → Variables → `UPLOAD_MODE` = `api`.")
+    if problems:
+        sys.exit("Sağlık kontrolü sorun buldu:\n- " + "\n- ".join(problems))
+    log("health check OK")
+
+
 # ---------------------------------------------------------------- selftest
 def cmd_selftest(_args) -> None:
     if not MOCK:
@@ -567,6 +634,7 @@ def main() -> None:
     sub.add_parser("selftest")
     sub.add_parser("check")
     sub.add_parser("auto-approve")
+    sub.add_parser("health")
     ms = sub.add_parser("merge-state")
     ms.add_argument("base")
     ms.add_argument("mine")
@@ -574,7 +642,7 @@ def main() -> None:
     args = p.parse_args()
     {"colab-cleanup": lambda _a: __import__("pipeline.colab_remote", fromlist=["x"]).cleanup_all(),
      "topics": cmd_topics, "produce": cmd_produce, "review": cmd_review, "compile": cmd_compile,
-     "selftest": cmd_selftest, "check": cmd_check, "auto-approve": cmd_auto_approve, "merge-state": cmd_merge_state}[args.cmd](args)
+     "selftest": cmd_selftest, "check": cmd_check, "auto-approve": cmd_auto_approve, "health": cmd_health, "merge-state": cmd_merge_state}[args.cmd](args)
 
 
 if __name__ == "__main__":
