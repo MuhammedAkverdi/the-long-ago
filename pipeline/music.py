@@ -49,8 +49,22 @@ def _chime(root: float, rnd: random.Random) -> np.ndarray:
     return 0.55 * tone * np.exp(-t * 1.3) * np.minimum(1, t * 200)
 
 
-def make_bed(total: float, chapter_starts: list[float], out: pathlib.Path, seed: str) -> pathlib.Path:
-    """Write a stereo WAV `total` seconds long, already mixed to sit ~20-24 dB under the narration."""
+def reveal_gain(reveals: list[float], hold: float = 0.7, ramp: float = 0.5, floor: float = 0.06) -> str | None:
+    """ffmpeg volume expression: the bed fades almost to silence around each reveal moment
+    (from `hold` s before to `hold` s after it), then swells back over `ramp` s."""
+    terms = [f"max({floor},min(1,(abs(t-{r:.3f})-{hold})/{ramp}))" for r in sorted(reveals) if r > 1]
+    if not terms:
+        return None
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = f"min({expr},{t})"
+    return expr
+
+
+def make_bed(total: float, chapter_starts: list[float], out: pathlib.Path, seed: str,
+             reveals: list[float] | None = None) -> pathlib.Path:
+    """Write a stereo WAV `total` seconds long, already mixed to sit ~20-24 dB under the narration.
+    `reveals`: moments (s) where the music briefly drops out to let a surprising line land."""
     rnd = random.Random(seed)
     root = 110 * 2 ** (rnd.randint(-4, 3) / 12)   # around A2
     prog = rnd.choice(PROGRESSIONS)
@@ -106,7 +120,8 @@ def make_bed(total: float, chapter_starts: list[float], out: pathlib.Path, seed:
     level = float(CFG["video"].get("music_lufs", -33))
     run(["ffmpeg", "-y", "-i", str(raw), "-af",
          f"aecho=0.8:0.7:120|260:0.35|0.22,lowpass=f=2600,highpass=f=60,"
-         f"afade=t=out:st={max(total - 6, 0):.2f}:d=6,loudnorm=I={level}:TP=-9:LRA=7",
+         f"afade=t=out:st={max(total - 6, 0):.2f}:d=6,loudnorm=I={level}:TP=-9:LRA=7"
+         + (f",volume='{gain}':eval=frame" if (gain := reveal_gain(reveals or [])) else ""),
          "-t", f"{total:.3f}", "-ar", str(SR), "-ac", "2", str(out)])
     raw.unlink(missing_ok=True)
     log(f"music bed: {total:.0f}s, root {root:.1f} Hz, chord every {chord_s:.1f}s")

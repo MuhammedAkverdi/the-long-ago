@@ -15,10 +15,14 @@ channel:
   publish_slots:
     - {weekday: 2, time: "17:00"}   # Çarşamba
     - {weekday: 5, time: "17:00"}   # Cumartesi
-  shorts_slots:
-    - {weekday: 1, time: "15:00"}   # Salı
-    - {weekday: 4, time: "15:00"}   # Cuma
-    - {weekday: 6, time: "15:00"}   # Pazar
+  shorts_slots:                     # bölüm başı 4 Short x haftada 2 bölüm = ~8 Short: her gün bir tane
+    - {weekday: 0, time: "15:00"}
+    - {weekday: 1, time: "15:00"}
+    - {weekday: 2, time: "12:00"}   # ana video günü: Short öğlen, ana video 17:00
+    - {weekday: 3, time: "15:00"}
+    - {weekday: 4, time: "15:00"}
+    - {weekday: 5, time: "12:00"}
+    - {weekday: 6, time: "15:00"}
   default_tags: ["history", "daily life in history", "history documentary", "medieval life", "ancient history", "sleep history"]
 
 # Her rol için sırayla denenen modeller. Biri kapanırsa/kotası biterse sıradakine geçilir.
@@ -60,10 +64,12 @@ voice:
   gemini_voice: "Charon"
 
 script:
-  target_minutes: 27               # uyanık izleyici belgeseli: 25-35 dk
+  target_minutes: 12               # 3. bölümden itibaren 10-15 dk "soru" bölümleri (çok izlenenler 8-16 dk)
   words_per_minute: 160             # kokoro_speed 0.98 ile ölçülen konuşma hızına yakın
-  chapters: [7, 9]                  # en az / en fazla bölüm
-  shorts_per_episode: 2
+  chapters: [4, 6]                  # en az / en fazla bölüm
+  shorts_per_episode: 4             # her biri kendi açılış cümlesiyle
+  hook_candidates: 10               # açılış turnuvası: bu kadar aday yazılır, ayrı bir hakem puanlar
+  comment_cta: true                 # son bölüm, izleyiciye yoruma yazacağı tek bir soru sorar
   topics_per_week: 6
   episodes_per_week: 2
 
@@ -71,8 +77,12 @@ video:
   width: 1920
   height: 1080
   fps: 25
-  seconds_per_image: 27             # ~60 görsel/bölüm (kota biterse ertesi gün kaldığı yerden devam eder)
-  shot_seconds: 10                  # her görsel ~10 sn'lik farklı kadrajlara bölünür (görüntü sık değişir)
+  seconds_per_image: 14             # ~50 görsel/bölüm (kota biterse ertesi gün kaldığı yerden devam eder)
+  shot_seconds: 4                   # her görsel ~4 sn'lik farklı kadrajlara bölünür (çok izlenenlerde 3-5 sn)
+  word_cards: true                  # bölüm başına 1-2 tek kelimelik kart (kota harcamaz)
+  archival_images: true             # Wikimedia Commons'tan kamu malı tablo/harita (kota harcamaz)
+  archival_max: 6
+  music_reveals: true               # büyük açıklama anlarında müzik ~1,5 sn susar
   zoom_supersample: 2
   crossfade: 0.8                    # sahne geçişi (saniye)
   grain: 3                          # film dokusu (0 = kapalı)
@@ -86,6 +96,27 @@ video:
     painterly historical illustration, soft oil painting, muted warm earth palette,
     gentle candle or daylight, cinematic composition, detailed everyday objects,
     no text, no letters, no watermark, not photorealistic
+  # Bölümler sırayla bu stilleri dener (A/B testi). Hangisi iyi giderse listede onu bırakın.
+  style_rotation: ["doodle", "painterly"]
+  styles:
+    painterly: >-
+      painterly historical illustration, soft oil painting, muted warm earth palette,
+      gentle candle or daylight, cinematic composition, detailed everyday objects,
+      no text, no letters, no watermark, not photorealistic
+    doodle: >-
+      simple hand-drawn doodle cartoon, clean thick black ink outlines, flat soft colours,
+      round-headed cartoon people with dot eyes and expressive eyebrows, period-accurate
+      simple clothing, uncluttered background with a few telling objects, gentle paper texture,
+      no text, no letters, no watermark, not photorealistic
+
+# Kanalın tek tasarım dili: tüm başlık kartları, altyazılar ve kapaklar bunları kullanır.
+brand:
+  ink: "#1C1A17"        # yazı / kontur
+  paper: "#F3EADB"      # kart zemini
+  accent: "#E9A53C"     # vurgu (kapak yazısı, Shorts altyazısı)
+  deep: "#7B2F2A"       # ikincil vurgu
+  title_font: "assets/fonts/Anton-Regular.ttf"        # OFL lisanslı
+  hand_font: "assets/fonts/PatrickHand-Regular.ttf"   # OFL lisanslı, kelime kartları
 
 colab:                              # isteğe bağlı: Colab not defteri açıksa resimleri o çizer
   enabled: true

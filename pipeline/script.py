@@ -38,6 +38,17 @@ STORY_RULES = """Storytelling rules (the episode must feel like a story, not an 
 - Use concrete numbers wherever the sources give them: wages, prices, hours, distances, ages.
 - Vary rhythm: short punchy sentences at key moments, longer ones for description."""
 
+OPENING_FORMULA = """Opening formula (the first ~30 seconds, used by the most-watched history explainers):
+1. Start inside the viewer's own day, in second person ("This morning an alarm screamed at you...",
+   "Tonight you'll flip a switch...").
+2. Hard cut to the past with a concrete time jump ("Now rewind 600 years.") and one vivid,
+   specific person or scene from the research.
+3. Name the common belief about it ("Everyone assumes...").
+4. Hint that real evidence overturns it, naming the kind of evidence (skeletons, court records,
+   wage books, letters...), without giving the answer away.
+5. End on the open question the episode will answer.
+Short spoken sentences. No greeting, no channel name, no "in this video"."""
+
 SYSTEM = (CHANNEL_BRIEF + "\nYou write narration that is read aloud by a single calm narrator. "
           "Write in plain, vivid spoken English with varied sentence length. Never use headings, "
           "bullet points, stage directions, emojis or markdown inside narration. Never invent "
@@ -56,6 +67,7 @@ def _mock_script(topic: str, structure: str) -> dict:
             "heading": f"Chapter {i + 1}",
             "narration": " ".join([f"This is mock sentence {j} of chapter {i + 1}, about {topic}." for j in range(12)]),
             "image_prompts": [f"mock scene {i}-{k}" for k in range(3)],
+            "cards": [{"after_image": 0, "text": f"MOCK CARD {i}"}], "reveal": 0.5,
         })
     return {
         "topic": topic, "structure": structure, "title": f"Mock: {topic}"[:95],
@@ -65,7 +77,8 @@ def _mock_script(topic: str, structure: str) -> dict:
         "shorts": [{"title": "Mock short #shorts", "narration": "This is a short mock narration for testing vertical video. " * 3,
                     "image_prompts": ["mock vertical a", "mock vertical b", "mock vertical c"]}],
         "sources": [{"title": "Example source", "url": "https://example.org"}],
-        "fact_check": "mock",
+        "fact_check": "mock", "visual_style": "doodle",
+        "hook_options": [{"text": "Mock hook.", "score": 8, "why": "mock"}], "archival_requests": [],
     }
 
 
@@ -83,7 +96,70 @@ def _step(cache, name: str, fn):
     return value
 
 
-def build(topic: str, structure: str, cache: pathlib.Path | None = None) -> dict:
+def _style_rules(style: str) -> str:
+    if style == "doodle":
+        return ("Pictures are simple doodle cartoons: describe ONE clear action per picture with few objects, "
+                "and draw the episode's main character the same way every time using this exact look: ")
+    return ""
+
+
+def pick_hook(topic: str, notes: str, outline: dict, n: int) -> tuple[str, list[dict]]:
+    """Write n candidate openings, let a separate model judge them, return (best, top-3 with scores)."""
+    def check_hooks(o):
+        if len([h for h in o.get("hooks", []) if str(h).strip()]) < max(2, n // 2):
+            raise ValueError("too few hooks")
+
+    cands = generate_json(f"""Episode: "{topic}". Protagonist: {outline.get('protagonist', 'composite')}.
+Most dramatic real moment from the research: {outline.get('opening_moment', '')}
+{OPENING_FORMULA}
+
+Research notes (use only facts supported here):
+<<<
+{notes[:12000]}
+>>>
+
+Write {n} DIFFERENT openings (60-90 spoken words each) that follow the formula. Vary the
+modern moment, the past scene and the question. Return JSON {{"hooks": ["...", ...]}}""",
+                          system=SYSTEM, temperature=1.0, validate=check_hooks)
+    hooks = [str(h).strip() for h in cands["hooks"] if str(h).strip()][:n]
+    listing = "\n\n".join(f"[{i}] {h}" for i, h in enumerate(hooks))
+    judged = generate_json(f"""You judge YouTube video openings for a history explainer channel. Score each
+opening 1-10 on: (a) would a casual viewer keep watching after 10 seconds, (b) a concrete, specific
+image or person rather than generalities, (c) an honest open question that the episode can answer,
+(d) follows this formula:
+{OPENING_FORMULA}
+Penalise clickbait that the facts cannot support, invented facts, greetings and vague wording.
+
+Openings:
+{listing}
+
+Return JSON {{"scores": [{{"index": int, "score": number, "why": "short"}}]}} for every opening.""",
+                           role="light", temperature=0.2)
+    scores = {}
+    for item in judged.get("scores", []) if isinstance(judged, dict) else []:
+        try:
+            scores[int(item["index"])] = (float(item["score"]), str(item.get("why", "")))
+        except (KeyError, TypeError, ValueError):
+            continue
+    ranked = sorted(range(len(hooks)), key=lambda i: -scores.get(i, (0, ""))[0])
+    top = [{"text": hooks[i], "score": scores.get(i, (0, ""))[0], "why": scores.get(i, (0, ""))[1]} for i in ranked[:3]]
+    return hooks[ranked[0]], top
+
+
+REVEAL = "[REVEAL]"
+
+
+def take_reveal(text: str) -> tuple[str, float | None]:
+    """Remove the [REVEAL] marker; return the clean text and where it was (0-1 of the text)."""
+    idx = text.find(REVEAL)
+    clean = " ".join(text.replace(REVEAL, " ").split())
+    if idx < 0 or not clean:
+        return clean, None
+    before = " ".join(text[:idx].replace(REVEAL, " ").split())
+    return clean, round(len(before) / len(clean), 4)
+
+
+def build(topic: str, structure: str, cache: pathlib.Path | None = None, style: str = "painterly") -> dict:
     if MOCK:
         return _mock_script(topic, structure)
     if cache and (cache / "structure.json").exists():  # a resumed episode keeps its first structure
@@ -118,12 +194,11 @@ def build(topic: str, structure: str, cache: pathlib.Path | None = None) -> dict
 Narrative structure: {STRUCTURES[structure]}
 Total narration length: about {total_words} words, split into {lo}-{hi} chapters.
 {STORY_RULES}
-Opening (chapter 1): the very first 2-3 sentences (10-15 seconds) drop the viewer into the
-single most dramatic REAL moment of this subject from the research notes (a crisis, a
-risk, a conflict, a striking discovery), then state the question or stakes the episode
-will answer. Only after about 45 seconds comes one short line introducing The Long Ago.
+The episode answers ONE curious question a modern viewer would ask about this subject.
+{OPENING_FORMULA}
+Only after about 45 seconds comes one short line introducing The Long Ago.
 This is not a series recap: never say "welcome back".
-The last chapter pays off the opening question, then ends with a calm reflection
+The last chapter pays off the opening question, then ends with a short reflection
 connecting their world to ours.
 
 Research notes (only use facts supported here or that are widely established):
@@ -133,13 +208,28 @@ Research notes (only use facts supported here or that are widely established):
 
 Return JSON: {{"protagonist": "the real named person (or attested family) the episode follows, with the
 evidence for them, or 'composite' if the sources name nobody", "opening_moment": "the dramatic real moment
-used in the first seconds", "chapters": [{{"heading": "short chapter title (for YouTube chapters)",
+used in the first seconds", "question": "the one question the episode answers",
+"character_look": "for pictures: how the protagonist looks, in 15-25 words (age, build, hair, the same simple
+period clothing every time)", "chapters": [{{"heading": "short chapter title (for YouTube chapters)",
 "beats": ["3-6 specific points this chapter covers, with concrete numbers where known"],
 "cliffhanger": "the tension or open question that ends this chapter", "words": integer}}]}}""",
                             system=SYSTEM, validate=check_outline))
 
+    n_hooks = int(sc.get("hook_candidates", 0) or 0)
+    hook, hook_options = "", []
+    if n_hooks >= 2:
+        log(f"hook tournament: {n_hooks} candidates")
+        try:
+            hook, hook_options = _step(cache, "hooks", lambda: list(pick_hook(topic, notes, outline, n_hooks)))
+        except Exception as exc:  # noqa: BLE001 - without a winner, chapter 1 writes its own opening
+            log(f"hook tournament failed, chapter 1 writes its own opening: {str(exc)[:150]}")
+    look = str(outline.get("character_look", "")).strip()
+    style_rules = _style_rules(style) + (look if style == "doodle" else "")
+    cta = bool(sc.get("comment_cta", True))
+
     chapters = []
     previous_tail = ""
+    n_chapters = len(outline["chapters"])
     for i, ch in enumerate(outline["chapters"]):
         words = ch["words"] if 150 <= ch["words"] <= 1500 else total_words // len(outline["chapters"])
         n_images = max(2, round(words / words_per_image * (1.5 if i == 0 else 1)))  # busier opening
@@ -162,8 +252,10 @@ The previous chapter ended with: "{previous_tail}"
 Continue smoothly from it without repeating it.
 {STORY_RULES}
 Protagonist of the episode: {outline.get('protagonist', 'composite')}
-{"This is the OPENING chapter: start with this moment, no greeting first: " + str(outline.get('opening_moment', '')) if i == 0 else ""}
-End this chapter on: {ch.get('cliffhanger') or 'a tension or open question that pulls into the next chapter'}
+{("This is the OPENING chapter. Begin with exactly this opening, word for word, then continue: " + hook) if i == 0 and hook else ("This is the OPENING chapter: start with this moment, no greeting first: " + str(outline.get('opening_moment', ''))) if i == 0 else ""}
+{("This is the LAST chapter: after the payoff, end with ONE short, specific question for viewers to answer in the comments about which ordinary job or life in the past we should explore next (no begging for likes or subscriptions).") if cta and i == n_chapters - 1 else "End this chapter on: " + (ch.get('cliffhanger') or 'a tension or open question that pulls into the next chapter')}
+Put the marker [REVEAL] (exactly like that) right before the single most surprising sentence of this
+chapter, once. It is removed before narration; music pauses there.
 
 Research notes:
 <<<
@@ -180,12 +272,24 @@ the period had them (say "clay jar", "wooden cup"...), no famous landmarks that 
 exact place (e.g. no Giza pyramids in a Theban village), no crowns, royal headdresses or
 regalia on ordinary people, no paved modern roads, no modern tools or furniture. Describe
 what ordinary clothing, hair and headwear looked like for this class at this time.
+{style_rules}
 
-Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
+Also give 1-2 "cards": a key word or very short phrase (1-3 words, e.g. "12 HOURS", "PROGRESS?",
+"NO SALT") shown alone on a plain card right after image number "after_image" (0-based).
+
+Return JSON: {{"narration": "...", "image_prompts": ["..."], "cards": [{{"after_image": int, "text": "..."}}]}}""",
                             system=SYSTEM, validate=check_chapter))
+        cards = []
+        for c in out.get("cards") or []:
+            try:
+                text = " ".join(str(c["text"]).split())[:28]
+                if text:
+                    cards.append({"after_image": max(0, int(c.get("after_image", 0))), "text": text})
+            except (KeyError, TypeError, ValueError):
+                continue
         chapters.append({"heading": ch["heading"].strip(), "narration": out["narration"].strip(),
-                         "image_prompts": [str(p) for p in out["image_prompts"]]})
-        previous_tail = " ".join(out["narration"].split()[-40:])
+                         "image_prompts": [str(p) for p in out["image_prompts"]], "cards": cards[:2]})
+        previous_tail = " ".join(out["narration"].replace(REVEAL, " ").split()[-40:])
 
     try:
         chapters, n_issues = _step(cache, "factcheck", lambda: list(fact_check(topic, notes, chapters)))
@@ -193,6 +297,16 @@ Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
     except Exception as exc:  # noqa: BLE001 - never lose a whole episode to the checker
         log(f"fact check failed, continuing without it: {exc}")
         fact_status = "ÇALIŞMADI, dikkatle kontrol edin"
+
+    for c in chapters:
+        c["narration"], c["reveal"] = take_reveal(c["narration"])
+
+    archival = []
+    if CFG["video"].get("archival_images"):
+        try:
+            archival = _step(cache, "archival", lambda: archival_requests(topic, chapters))
+        except Exception as exc:  # noqa: BLE001 - optional
+            log(f"archival picture search plan skipped: {str(exc)[:150]}")
 
     log("writing metadata")
     full_text = "\n\n".join(c["narration"] for c in chapters)
@@ -211,19 +325,21 @@ Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
 
 Create YouTube packaging. Return JSON with:
 "title_options": 3 different honest titles, max 70 characters each, no ALL CAPS words. Use the styles
-  that win in this niche: second person ("Why You Wouldn't Survive a Day as a ..."), a curiosity gap
-  ("The Secret Life of ..."), or stakes ("What Happened When ..."). Put the best one first;
+  that win in this niche: a curiosity question ("What Did ... Actually Do All Day?"), second person
+  ("Why You Wouldn't Last a Week as a ..."), or stakes ("What Happened When ..."). Put the best one first;
 "title": the same text as the first title option;
 "description": 2 short paragraphs (max 900 characters total) that summarize the episode for
   search; mention the time period and place; no hashtags, no links, no timestamps;
 "tags": 12-15 search tags;
-"thumbnail_text": 2-4 word hook with tension or a twist, not a label of the topic (good:
-  "UNPAID. SO THEY STRUCK.", "LEAVE = DEATH", "THEY ATE THIS?"; bad: "THE REAL TOMB BUILDERS");
-"thumbnail_prompt": one striking, simple scene for the thumbnail image, single focal subject,
-  strong contrast, leave empty space on the left for text;
+"thumbnail_text": 1-3 words with tension or a twist, not a label of the topic (good:
+  "NO JOBS", "2 SLEEPS?", "LEAVE = DEATH", "THEY ATE THIS?"; bad: "THE REAL TOMB BUILDERS");
+"thumbnail_prompt": one character showing one strong emotion in one simple situation, single focal
+  subject, plain uncluttered background, strong contrast, empty space on the left for text;
 "shorts": {sc['shorts_per_episode']} objects {{"title": "<70 chars, ends with #shorts",
-  "narration": "a self-contained 90-120 word story taken from the most surprising facts in the
-  episode, starting with a strong first sentence", "image_prompts": [4 vertical scene prompts]}}""",
+  "narration": "a self-contained 90-120 word story about ONE different surprising fact from the
+  episode (each Short a different fact and a different sentence pattern), whose first sentence is
+  its own hook: a concrete image plus an open question, in second person where it fits",
+  "image_prompts": [3 vertical scene prompts]}}""",
                          system=SYSTEM, validate=check_meta))
 
     return {
@@ -232,8 +348,35 @@ Create YouTube packaging. Return JSON with:
         "description": meta["description"].strip(), "tags": [str(t) for t in meta["tags"]][:20],
         "thumbnail_text": meta["thumbnail_text"].strip(), "thumbnail_prompt": meta["thumbnail_prompt"],
         "chapters": chapters, "shorts": meta["shorts"][: sc["shorts_per_episode"]], "sources": sources,
-        "fact_check": fact_status,
+        "fact_check": fact_status, "visual_style": style, "hook_options": hook_options,
+        "archival_requests": archival,
     }
+
+
+def archival_requests(topic: str, chapters: list[dict]) -> list[dict]:
+    """Ask for a few Wikimedia Commons searches for real period pictures (paintings, maps, prints)."""
+    listing = "\n".join(f"[{i}] {c['heading']}: {' '.join(c['narration'].split()[:60])}" for i, c in enumerate(chapters))
+    n = int(CFG["video"].get("archival_max", 6))
+    out = generate_json(f"""A history episode about "{topic}" has these chapters:
+{listing}
+
+Suggest up to {n} Wikimedia Commons searches that would find REAL period pictures for them: paintings,
+engravings, woodcuts, old maps, manuscript illuminations or historical photographs from that time and
+place (not modern photos). Use the words a museum catalogue would use, 2-6 words, e.g.
+"Carpaccio Venice canal painting", "medieval peasants harvest illumination", "1850 lighthouse engraving".
+Return JSON {{"searches": [{{"chapter": int, "query": "...", "context": "the sentence it illustrates"}}]}}""",
+                        role="light", temperature=0.4)
+    items = out.get("searches", []) if isinstance(out, dict) else []
+    clean = []
+    for it in items:
+        try:
+            ch = int(it["chapter"])
+            if 0 <= ch < len(chapters) and str(it.get("query", "")).strip():
+                clean.append({"chapter": ch, "query": str(it["query"]).strip()[:80],
+                              "context": str(it.get("context", ""))[:300]})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return clean[:n + 2]
 
 
 def fact_check(topic: str, notes: str, chapters: list[dict]) -> tuple[list[dict], int]:
@@ -270,7 +413,8 @@ Return JSON: {{"issues": [{{"chapter": int, "problem": "...", "fix": "..."}}]}} 
         fixes = "\n".join(f"- {it.get('problem', '')} -> {it.get('fix', '')}" for it in items)
         original = chapters[idx]["narration"]
         revised = generate_text(f"""Revise this documentary narration to fix these problems, changing as
-little as possible and keeping the same length, tone and flow. Return only the revised narration text.
+little as possible and keeping the same length, tone and flow. Keep the marker [REVEAL] where it is
+(move it only if its sentence changes). Return only the revised narration text.
 
 Problems:
 {fixes}
