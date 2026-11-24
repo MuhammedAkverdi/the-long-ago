@@ -30,7 +30,8 @@ MODEL_ID_FALLBACKS = ["Z-a-o/Z-Image-Turbo"]   # aynı model, başka Hugging Fac
 JOBS_TAG = "colab-jobs"         # iş JSON'larının durduğu release
 RESULT_TAG_PREFIX = "colab-"    # sonuç release'i: colab-<slug>
 MAX_JOB_AGE_DAYS = 4            # bundan eski işler atlanır
-WAIT_HOURS = 3                  # en fazla bu kadar iş beklenir
+WAIT_MINUTES = 15               # iş yoksa en fazla bu kadar beklenir (GPU boşa birim yemesin)
+AUTO_DISCONNECT = True          # iş bitince/iş yoksa çalışma zamanını kapat (birim harcamayı durdurur)
 POLL_SECONDS = 30               # kaç saniyede bir bakılır
 
 # VRAM yetmezse daha küçük boyut ver, ör. {"16:9": (1344, 768), "9:16": (768, 1344)}
@@ -262,10 +263,60 @@ def show_preview(img, title):
 
 check_token()
 
+def pending_jobs(skipped):
+    """Return jobs that are neither done, expired nor already handled, oldest first."""
+    out = []
+    for job in sorted(fetch_jobs(), key=lambda j: parse_time(j["created"])):
+        slug = job["slug"]
+        if slug in skipped:
+            continue
+        if is_expired(job):
+            print(f"  Süresi geçmiş iş atlandı: {slug}")
+            skipped.add(slug)
+        elif is_done(slug):
+            print(f"  Zaten bitmiş iş atlandı: {slug}")
+            skipped.add(slug)
+        else:
+            out.append(job)
+    return out
+
+
 # %% Model yükleme
+def stop_runtime(msg):
+    """Release the GPU so no more compute units are spent."""
+    print(msg)
+    if AUTO_DISCONNECT:
+        try:
+            from google.colab import runtime
+            print("Çalışma zamanı kapatılıyor (birim harcanmasın).")
+            runtime.unassign()
+        except Exception as e:  # noqa: BLE001
+            print(f"Otomatik kapatılamadı ({e}); Runtime → Disconnect and delete runtime yapın.")
+
+
+def wait_for_job():
+    """Wait up to WAIT_MINUTES for a pending job before loading the (heavy) model."""
+    end = time.time() + WAIT_MINUTES * 60
+    while time.time() < end:
+        try:
+            if pending_jobs(set()):
+                return True
+        except Exception as exc:  # noqa: BLE001 - GitHub down or a bad job file: keep waiting until the deadline
+            print(f"  İşler okunamadı ({str(exc)[:120]}); tekrar denenecek.")
+        print(f"İş bekleniyor… (en fazla {(end - time.time()) / 60:.0f} dk daha)")
+        time.sleep(POLL_SECONDS)
+    return False
+
+
+if not wait_for_job():
+    stop_runtime(f"{WAIT_MINUTES} dk içinde iş gelmedi.")
+    raise SystemExit("İş yok.")
+
 import torch
 
-assert torch.cuda.is_available(), "GPU yok! Runtime → Change runtime type → A100 seç."
+if not torch.cuda.is_available():
+    stop_runtime("GPU yok!")
+    raise SystemExit("Runtime → Change runtime type → A100 seçip tekrar çalıştırın.")
 gpu_name = torch.cuda.get_device_name(0)
 vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
 print(f"GPU: {gpu_name} ({vram_gb:.0f} GB)")
@@ -285,6 +336,7 @@ for _mid in [MODEL_ID] + MODEL_ID_FALLBACKS:
         _err = e
         print(f"{_mid} yüklenemedi: {str(e)[:150]}")
 if pipe is None:
+    stop_runtime("Model yüklenemedi.")
     raise RuntimeError(f"Model yüklenemedi: {_err}")
 
 if vram_gb < 30:
@@ -361,27 +413,9 @@ def process_job(job):
     print(f"  Yüklendi ✓ {slug} ({(time.time() - started) / 60:.1f} dk)")
 
 
-def pending_jobs(skipped):
-    """Return jobs that are neither done, expired nor already handled, oldest first."""
-    out = []
-    for job in sorted(fetch_jobs(), key=lambda j: parse_time(j["created"])):
-        slug = job["slug"]
-        if slug in skipped:
-            continue
-        if is_expired(job):
-            print(f"  Süresi geçmiş iş atlandı: {slug}")
-            skipped.add(slug)
-        elif is_done(slug):
-            print(f"  Zaten bitmiş iş atlandı: {slug}")
-            skipped.add(slug)
-        else:
-            out.append(job)
-    return out
-
-
 def main():
-    """Poll for jobs for up to WAIT_HOURS and process each pending one."""
-    deadline = time.time() + WAIT_HOURS * 3600
+    """Process pending jobs; stop when none is left (or none arrives for WAIT_MINUTES)."""
+    deadline = time.time() + WAIT_MINUTES * 60
     skipped = set()   # done, expired, failed or finished in this session
     done_count = 0
     waiting_msg_shown = False
@@ -392,13 +426,16 @@ def main():
             except requests.RequestException as exc:
                 print(f"  GitHub'a ulaşılamadı ({exc}); tekrar denenecek.")
                 jobs = []
+            if not jobs and done_count:
+                break  # work done: don't keep the GPU (and its units) waiting
             if not jobs:
                 if not waiting_msg_shown:
                     left = (deadline - time.time()) / 60
-                    print(f"İş bekleniyor… (her {POLL_SECONDS} sn bakılıyor, en fazla {left:.0f} dk)")
+                    print(f"Yeni iş bekleniyor… (en fazla {left:.0f} dk)")
                     waiting_msg_shown = True
                 time.sleep(POLL_SECONDS)
                 continue
+            deadline = time.time() + WAIT_MINUTES * 60  # a job came: allow a short wait for the next one
             for job in jobs:
                 try:
                     process_job(job)
@@ -411,9 +448,12 @@ def main():
                     skipped.add(job["slug"])
                     torch.cuda.empty_cache()
             waiting_msg_shown = False
-        print(f"\nSüre doldu ({WAIT_HOURS} saat). Bitirilen iş: {done_count}.")
+        print(f"\nBekleyen iş kalmadı. Bitirilen iş: {done_count}.")
     except KeyboardInterrupt:
         print(f"\nDurduruldu. Bitirilen iş: {done_count}.")
 
 
-main()
+try:
+    main()
+finally:
+    stop_runtime("Bitti ✓")
