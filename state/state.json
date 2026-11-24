@@ -1,26 +1,60 @@
 {
+  "recent_structures": [
+    "year"
+  ],
+  "topics": {
+    "59f8716e": {
+      "pitch": "Explore the secluded island of Murano to see how Renaissance craft families guarded their glassmaking secrets and managed daily home life.",
+      "title": "A Day in the Life of a Glassmaker in 15th-Century Venice",
+      "work_slug": "20261124-59f8716e-a1",
+      "attempts": 1,
+      "paused": true,
+      "pauses": 1,
+      "status": "in_progress"
+    },
+    "2873754b": {
+      "pitch": "Experience the quiet, regular routine and solitary beauty of maintaining a remote coastal lighthouse during the Victorian era.",
+      "title": "How a Lighthouse Keeper Lived in 19th-Century Britain",
+      "status": "proposed",
+      "attempts": 0
+    },
+    "fe45819a": {
+      "pitch": "Uncover the rich archaeological record of home routines, meals, and wages among the royal tomb builders of Deir el-Medina.",
+      "title": "What Daily Life Was Like for Artisans in Ancient Egypt",
+      "work_slug": "20261124-fe45819a-a1",
+      "attempts": 1,
+      "pauses": 1,
+      "status": "produced"
+    },
+    "09d1a094": {
+      "pitch": "Discover the soothing rhythms of daily agricultural work, hearthside meals, and family rituals in the lowland Maya countryside.",
+      "title": "How Ordinary Maya Farmers Lived in 8th-Century Mesoamerica",
+      "status": "proposed",
+      "attempts": 0
+    },
+    "ab92ff71": {
+      "pitch": "Journey through the shaded markets and quiet courtyard homes of 9th-century Iraq during the peak of the Abbasid Caliphate.",
+      "title": "A Day in the Life of a Merchant in Golden Age Baghdad",
+      "status": "proposed",
+      "attempts": 0
+    },
+    "dca1b867": {
+      "pitch": "Step into the peaceful neighborhood quarters of feudal Japan to explore how urban merchant families lived, traded, and relaxed.",
+      "title": "A Day in the Life of a Shopkeeper in 17th-Century Edo",
+      "status": "proposed",
+      "attempts": 0
+    }
+  },
+  "scheduled": [],
   "episodes": {
     "20261124-fe45819a-a1": {
-      "status": "produced",
-      "structure": "year",
-      "fact_check": "1 düzeltme uygulandı",
-      "approve_requested": true,
       "title": "What Life Was Like for an Ancient Egyptian Tomb Builder",
-      "created": "2026-11-24T11:37:58.019475+00:00",
-      "review_issue": 8,
-      "slug": "20261124-fe45819a-a1",
-      "type": "episode",
-      "shorts": [
-        {
-          "file": "short0.mp4",
-          "title": "History's Very First Strike #shorts"
-        },
-        {
-          "file": "short1.mp4",
-          "title": "How Ancient Egyptians Lit the Tombs #shorts"
-        }
-      ],
+      "fact_check": "1 düzeltme uygulandı",
       "release_tag": "ep-20261124-fe45819a-a1",
+      "slug": "20261124-fe45819a-a1",
+      "structure": "year",
+      "created": "2026-11-24T11:37:58.019475+00:00",
+      "status": "produced",
       "minutes": 21.6,
       "tags": [
         "ancient egypt",
@@ -43,56 +77,22 @@
         "ancient history",
         "sleep history"
       ],
+      "shorts": [
+        {
+          "file": "short0.mp4",
+          "title": "History's Very First Strike #shorts"
+        },
+        {
+          "file": "short1.mp4",
+          "title": "How Ancient Egyptians Lit the Tombs #shorts"
+        }
+      ],
+      "review_issue": 8,
       "description": "Nestled in the arid hills of western Thebes over three thousand years ago lay Set Ma’at, meaning The Place of Truth. Known today as Deir el-Medina, this secluded desert village was home to the royal stonecutters, sculptors, draughtsmen, and scribes who carved and painted the magnificent tombs in the Valley of the Kings.\n\nAway from the grand monuments of the pharaohs, these specialized artisans led remarkably structured daily lives. From eight-day work shifts inside subterranean tombs to domestic squabbles, legal rights for women, and history's first recorded labor strike over delayed grain rations, explore what life was truly like for the ordinary people behind ancient Egypt's eternal wonders.\n\nChapters:\n0:00 The Village at the Edge of the Desert\n2:52 The Ten-Day Week in the Valley\n5:58 Autumn Days and Domestic Rhythms\n8:57 Rest Days, Barter, and Side Businesses\n11:50 Festivals and Household Gods\n14:13 Heat, Sickness, and Healer's Care\n16:40 Hardship and the First Recorded Strike\n19:22 Echoes Across the Sands\n\nSources and further reading:\n- Baines, John, and Eyre, Christopher, \"Four Notes on Literacy\", Göttinger Miszellen 61 (1983)\n- Černý, Jaroslav, A Community of Workmen in Thebes in the Ramesside Period (1973)\n- Janssen, Jac. J., Commodity Prices from the Ramessid Period (1975)\n- Kemp, Barry J., Ancient Egypt: Anatomy of a Civilization (1989)\n- Lesko, Leonard H. (ed.), Pharaoh's Workers: The Villagers of Deir el-Medina (1994)\n- Meskell, Lynn, Private Life in New Kingdom Egypt (2002)\n- Valbelle, Dominique, \"Les Ouvriers de la Tombe\": Deir el-Médineh à l'époque ramesside (1985)\n- Vernus, Pascal, Affairs and Scandals in Ancient Egypt (2003)\n\nIllustrations are AI-generated artistic reconstructions, not historical images. Narration is AI-voiced; the script is researched from the sources below and reviewed before publishing.\n\n#history #dailylife #thelongago",
-      "topic": "What Daily Life Was Like for Artisans in Ancient Egypt",
-      "topic_id": "fe45819a"
-    }
-  },
-  "recent_structures": [
-    "year"
-  ],
-  "scheduled": [],
-  "topics": {
-    "09d1a094": {
-      "status": "proposed",
-      "pitch": "Discover the soothing rhythms of daily agricultural work, hearthside meals, and family rituals in the lowland Maya countryside.",
-      "attempts": 0,
-      "title": "How Ordinary Maya Farmers Lived in 8th-Century Mesoamerica"
-    },
-    "2873754b": {
-      "status": "proposed",
-      "pitch": "Experience the quiet, regular routine and solitary beauty of maintaining a remote coastal lighthouse during the Victorian era.",
-      "attempts": 0,
-      "title": "How a Lighthouse Keeper Lived in 19th-Century Britain"
-    },
-    "dca1b867": {
-      "status": "proposed",
-      "pitch": "Step into the peaceful neighborhood quarters of feudal Japan to explore how urban merchant families lived, traded, and relaxed.",
-      "attempts": 0,
-      "title": "A Day in the Life of a Shopkeeper in 17th-Century Edo"
-    },
-    "ab92ff71": {
-      "status": "proposed",
-      "pitch": "Journey through the shaded markets and quiet courtyard homes of 9th-century Iraq during the peak of the Abbasid Caliphate.",
-      "attempts": 0,
-      "title": "A Day in the Life of a Merchant in Golden Age Baghdad"
-    },
-    "fe45819a": {
-      "status": "produced",
-      "attempts": 1,
-      "pitch": "Uncover the rich archaeological record of home routines, meals, and wages among the royal tomb builders of Deir el-Medina.",
-      "title": "What Daily Life Was Like for Artisans in Ancient Egypt",
-      "pauses": 1,
-      "work_slug": "20261124-fe45819a-a1"
-    },
-    "59f8716e": {
-      "status": "in_progress",
-      "attempts": 1,
-      "pitch": "Explore the secluded island of Murano to see how Renaissance craft families guarded their glassmaking secrets and managed daily home life.",
-      "title": "A Day in the Life of a Glassmaker in 15th-Century Venice",
-      "pauses": 0,
-      "work_slug": "20261124-59f8716e-a1",
-      "paused": true
+      "type": "episode",
+      "approve_requested": true,
+      "topic_id": "fe45819a",
+      "topic": "What Daily Life Was Like for Artisans in Ancient Egypt"
     }
   }
 }
