@@ -2,7 +2,7 @@ name: Hareket testi (2.5D)
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -24,7 +24,11 @@ jobs:
           pip install -q -r requirements.txt
       - name: Render test shots
         run: PYTHONPATH=. python scripts/motion_test.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: motion-test
-          path: work/motion_test/
+      - name: Publish test shots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd work/motion_test
+          ffmpeg -y -loglevel error -i shot_v0.mp4 -i shot_v2.mp4 -i shot_v6.mp4 -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1[v]" -map "[v]" -c:v libx264 -crf 20 -pix_fmt yuv420p motion_test.mp4
+          gh release view motion-test >/dev/null 2>&1 || gh release create motion-test --prerelease --title "Motion test" --notes "2.5D test shots"
+          gh release upload motion-test motion_test.mp4 test.depth.png --clobber
