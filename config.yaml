@@ -51,7 +51,7 @@ voice:
   provider: "kokoro"                # "kokoro" (ücretsiz, GitHub'da çalışır), "gemini" ya da "elevenlabs" (ücretli)
   kokoro_voice: "bm_george"         # İngiliz erkek anlatıcı
   kokoro_lang: "b"                  # b = British English
-  kokoro_speed: 0.92
+  kokoro_speed: 0.98              # 0.92 idi; 1. bölüm biraz ağır bulundu (~%6 hızlandırıldı)
   elevenlabs_voice_id: "lo1O1Dz1Tu4FWVEPaxuT"   # Oliver - Warm British Narrator
   elevenlabs_model: "eleven_multilingual_v2"
   stability: 0.55
@@ -60,8 +60,8 @@ voice:
   gemini_voice: "Charon"
 
 script:
-  target_minutes: 25
-  words_per_minute: 140
+  target_minutes: 27               # uyanık izleyici belgeseli: 25-35 dk
+  words_per_minute: 160             # kokoro_speed 0.98 ile ölçülen konuşma hızına yakın
   chapters: [7, 9]                  # en az / en fazla bölüm
   shorts_per_episode: 2
   topics_per_week: 6
@@ -71,7 +71,8 @@ video:
   width: 1920
   height: 1080
   fps: 25
-  seconds_per_image: 30             # ~50 görsel/bölüm: günlük ücretsiz Cloudflare kotasına sığar
+  seconds_per_image: 27             # ~60 görsel/bölüm (kota biterse ertesi gün kaldığı yerden devam eder)
+  shot_seconds: 10                  # her görsel ~10 sn'lik farklı kadrajlara bölünür (görüntü sık değişir)
   zoom_supersample: 2
   crossfade: 0.8                    # sahne geçişi (saniye)
   grain: 3                          # film dokusu (0 = kapalı)
@@ -79,6 +80,8 @@ video:
   crf: 23
   maxrate: "6M"
   music_volume: 0.07                # assets/music içine telifsiz müzik koyarsanız kullanılır
+  generated_music: true             # assets/music boşsa sistem kendi sakin fon müziğini üretir (telif yok)
+  music_lufs: -38                   # üretilen müziğin seviyesi: anlatımın ~22 dB altında
   image_style: >-
     painterly historical illustration, soft oil painting, muted warm earth palette,
     gentle candle or daylight, cinematic composition, detailed everyday objects,

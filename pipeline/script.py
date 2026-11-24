@@ -26,6 +26,18 @@ STRUCTURES = {
                  "(What did they eat? How did they wash? What did they do for fun?).",
 }
 
+STORY_RULES = """Storytelling rules (the episode must feel like a story, not an encyclopedia entry):
+- Follow one REAL named person or family from the record when the research notes name one
+  (for example a worker, a craftsman, a widow known from court records, letters or receipts).
+  Use only what the sources say about them; when you must imagine a detail, say so ("perhaps").
+  If no one is named in the sources, follow a clearly composite character and say it is composite.
+- Every chapter has a conflict, risk or open question: money running short, a dispute, a law,
+  a dangerous job, a secret. End each chapter with a tension that the next chapter picks up.
+- Include short second-person passages ("You wake before dawn. Your hands still smell of...")
+  that put the viewer inside the scene.
+- Use concrete numbers wherever the sources give them: wages, prices, hours, distances, ages.
+- Vary rhythm: short punchy sentences at key moments, longer ones for description."""
+
 SYSTEM = (CHANNEL_BRIEF + "\nYou write narration that is read aloud by a single calm narrator. "
           "Write in plain, vivid spoken English with varied sentence length. Never use headings, "
           "bullet points, stage directions, emojis or markdown inside narration. Never invent "
@@ -105,24 +117,32 @@ def build(topic: str, structure: str, cache: pathlib.Path | None = None) -> dict
     outline = _step(cache, "outline", lambda: generate_json(f"""Episode topic: {topic}
 Narrative structure: {STRUCTURES[structure]}
 Total narration length: about {total_words} words, split into {lo}-{hi} chapters.
-The first chapter must open with a 2-3 sentence hook that makes the viewer curious,
-then a gentle line welcoming them to The Long Ago. The last chapter ends with a calm
-reflection connecting their world to ours.
+{STORY_RULES}
+Opening (chapter 1): the very first 2-3 sentences (10-15 seconds) drop the viewer into the
+single most dramatic REAL moment of this subject from the research notes (a crisis, a
+risk, a conflict, a striking discovery), then state the question or stakes the episode
+will answer. Only after about 45 seconds comes one short line introducing The Long Ago.
+This is not a series recap: never say "welcome back".
+The last chapter pays off the opening question, then ends with a calm reflection
+connecting their world to ours.
 
 Research notes (only use facts supported here or that are widely established):
 <<<
 {notes}
 >>>
 
-Return JSON: {{"chapters": [{{"heading": "short chapter title (for YouTube chapters)",
-"beats": ["3-6 specific points this chapter covers"], "words": integer}}]}}""",
+Return JSON: {{"protagonist": "the real named person (or attested family) the episode follows, with the
+evidence for them, or 'composite' if the sources name nobody", "opening_moment": "the dramatic real moment
+used in the first seconds", "chapters": [{{"heading": "short chapter title (for YouTube chapters)",
+"beats": ["3-6 specific points this chapter covers, with concrete numbers where known"],
+"cliffhanger": "the tension or open question that ends this chapter", "words": integer}}]}}""",
                             system=SYSTEM, validate=check_outline))
 
     chapters = []
     previous_tail = ""
     for i, ch in enumerate(outline["chapters"]):
         words = ch["words"] if 150 <= ch["words"] <= 1500 else total_words // len(outline["chapters"])
-        n_images = max(2, round(words / words_per_image))
+        n_images = max(2, round(words / words_per_image * (1.5 if i == 0 else 1)))  # busier opening
         log(f"writing chapter {i + 1}/{len(outline['chapters'])}: {ch['heading']} (~{words} words)")
 
         def check_chapter(o, n_images=n_images, words=words):
@@ -140,6 +160,10 @@ Structure of the whole episode: {STRUCTURES[structure]}
 Full outline for context: {[c['heading'] for c in outline['chapters']]}
 The previous chapter ended with: "{previous_tail}"
 Continue smoothly from it without repeating it.
+{STORY_RULES}
+Protagonist of the episode: {outline.get('protagonist', 'composite')}
+{"This is the OPENING chapter: start with this moment, no greeting first: " + str(outline.get('opening_moment', '')) if i == 0 else ""}
+End this chapter on: {ch.get('cliffhanger') or 'a tension or open question that pulls into the next chapter'}
 
 Research notes:
 <<<
@@ -150,6 +174,12 @@ Also write {n_images} image prompts, in order, one for each consecutive part of 
 narration. Each prompt describes a single concrete scene (people, place, objects, light,
 time of day) that matches what is being said at that moment. Ordinary anonymous people
 only, never a real historical person's face. Period-accurate clothing and architecture.
+The image model takes every word literally and knows nothing about the period, so spell out
+the right materials and avoid anachronisms: no glass drinking glasses or foaming beer unless
+the period had them (say "clay jar", "wooden cup"...), no famous landmarks that are not at this
+exact place (e.g. no Giza pyramids in a Theban village), no crowns, royal headdresses or
+regalia on ordinary people, no paved modern roads, no modern tools or furniture. Describe
+what ordinary clothing, hair and headwear looked like for this class at this time.
 
 Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
                             system=SYSTEM, validate=check_chapter))
@@ -180,11 +210,15 @@ Return JSON: {{"narration": "...", "image_prompts": ["..."]}}""",
 >>>
 
 Create YouTube packaging. Return JSON with:
-"title": click-worthy but honest title, max 70 characters, no clickbait lies, no ALL CAPS words;
+"title_options": 3 different honest titles, max 70 characters each, no ALL CAPS words. Use the styles
+  that win in this niche: second person ("Why You Wouldn't Survive a Day as a ..."), a curiosity gap
+  ("The Secret Life of ..."), or stakes ("What Happened When ..."). Put the best one first;
+"title": the same text as the first title option;
 "description": 2 short paragraphs (max 900 characters total) that summarize the episode for
   search; mention the time period and place; no hashtags, no links, no timestamps;
 "tags": 12-15 search tags;
-"thumbnail_text": 2-4 word hook for the thumbnail (e.g. "THEY ATE THIS?");
+"thumbnail_text": 2-4 word hook with tension or a twist, not a label of the topic (good:
+  "UNPAID. SO THEY STRUCK.", "LEAVE = DEATH", "THEY ATE THIS?"; bad: "THE REAL TOMB BUILDERS");
 "thumbnail_prompt": one striking, simple scene for the thumbnail image, single focal subject,
   strong contrast, leave empty space on the left for text;
 "shorts": {sc['shorts_per_episode']} objects {{"title": "<70 chars, ends with #shorts",
@@ -194,6 +228,7 @@ Create YouTube packaging. Return JSON with:
 
     return {
         "topic": topic, "structure": structure, "title": meta["title"].strip(),
+        "title_options": [str(t).strip() for t in meta.get("title_options", []) if str(t).strip()][:3],
         "description": meta["description"].strip(), "tags": [str(t) for t in meta["tags"]][:20],
         "thumbnail_text": meta["thumbnail_text"].strip(), "thumbnail_prompt": meta["thumbnail_prompt"],
         "chapters": chapters, "shorts": meta["shorts"][: sc["shorts_per_episode"]], "sources": sources,

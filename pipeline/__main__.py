@@ -123,8 +123,10 @@ def review_body(record: dict, release_url: str) -> str:
     lines = [f"<!-- episode:{record['slug']} -->", f"## {record['title']}", "",
              f"Süre: **{record['minutes']} dk** · Anlatı yapısı: `{record.get('structure', '-')}` · Shorts: {len(record.get('shorts', []))}",
              f"Doğruluk kontrolü: {record.get('fact_check', '-')}", "",
+             *(["Başlık seçenekleri: " + " · ".join(f"`{t}`" for t in record["title_options"]), ""]
+               if record.get("title_options") else []),
              f"İzlemek için (telefondan da açılır): {release_url}", "",
-             (f"**Doğruluk kontrolü çalışmadığı için bu video otomatik onaylanmaz; `/onay` yazmanız gerekir.**"
+             ("**Doğruluk kontrolü çalışmadığı için bu video otomatik onaylanmaz; `/onay` yazmanız gerekir.**"
               if str(record.get("fact_check", "")).startswith("ÇALIŞMADI") else
               f"**Hiçbir şey yapmazsanız {hours} saat sonra otomatik onaylanır ve yayın takvimine girer.**"),
              "- Hemen onaylamak için yoruma `/onay` yazın", "- Yayınlanmasın derseniz `/iptal` yazın", "",

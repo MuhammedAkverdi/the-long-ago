@@ -33,6 +33,11 @@ def assemble_narration(wavs: list[pathlib.Path], out: pathlib.Path) -> tuple[lis
     return starts, durs
 
 
+# Camera moves. 0-3 are centred; 4-7 drift toward a different part of the picture, so two shots
+# cut from the same image look like different framings (a close look at the left, then the right...).
+_FOCI = [(0.2, 0.35), (0.8, 0.35), (0.3, 0.7), (0.7, 0.65)]
+
+
 def _zoompan(variant: int, frames: int) -> tuple[str, str, str]:
     p = f"(on/{max(frames - 1, 1)})"
     if variant == 0:   # slow zoom in
@@ -41,7 +46,27 @@ def _zoompan(variant: int, frames: int) -> tuple[str, str, str]:
         return f"1.12-0.12*{p}", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     if variant == 2:   # pan left -> right
         return "1.12", f"(iw-iw/zoom)*{p}", "ih/2-(ih/zoom/2)"
-    return "1.12", f"(iw-iw/zoom)*(1-{p})", "ih/2-(ih/zoom/2)"  # pan right -> left
+    if variant == 3:   # pan right -> left
+        return "1.12", f"(iw-iw/zoom)*(1-{p})", "ih/2-(ih/zoom/2)"
+    fx, fy = _FOCI[(variant - 4) % len(_FOCI)]  # closer framing that slowly pushes toward a focus point
+    return f"1.25+0.1*{p}", f"(iw-iw/zoom)*{fx}", f"(ih-ih/zoom)*{fy}"
+
+
+N_VARIANTS = 8
+
+
+def shots(segments: list[tuple[pathlib.Path, float, float]], groups: list[int],
+          shot_seconds: float) -> tuple[list[tuple[pathlib.Path, float, float]], list[int]]:
+    """Cut each image's time into shots of about `shot_seconds`, so the picture changes framing
+    every ~10 s even when a new image only comes every ~30 s."""
+    out, out_groups = [], []
+    for (img, s, e), g in zip(segments, groups):
+        n = max(1, round((e - s) / shot_seconds)) if shot_seconds > 0 else 1
+        step = (e - s) / n
+        for k in range(n):
+            out.append((img, s + k * step, e if k == n - 1 else s + (k + 1) * step))
+            out_groups.append(g)
+    return out, out_groups
 
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
@@ -103,6 +128,7 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
     fps = CFG["video"]["fps"]
     groups = groups or [0] * len(segments)
     titles = titles or {}
+    segments, groups = shots(segments, groups, float(CFG["video"].get("shot_seconds", 0)))
     clip_dir = out.parent / f"_clips_{out.stem}"
     clip_dir.mkdir(exist_ok=True)
     rnd = random.Random(str(out))
@@ -112,7 +138,7 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
     for g in groups:
         if g not in order:
             order.append(g)
-    parts, last_variant = [], -1
+    parts, last_variant, last_img = [], -1, None
     for gi, g in enumerate(order):
         idx = [i for i, gg in enumerate(groups) if gg == g and frames[i] > 0]
         if not idx:
@@ -121,10 +147,12 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
         xf = max(1, int(min(CFG["video"].get("crossfade", 0.8) * fps, min(fr) // 3))) if len(idx) > 1 else 0
         clips = []
         for j, i in enumerate(idx):
-            variant = rnd.choice([v for v in range(4) if v != last_variant])
-            last_variant = variant
+            img = segments[i][0]
+            pool = range(N_VARIANTS) if img != last_img else [v for v in range(N_VARIANTS) if (v >= 4) != (last_variant >= 4)]
+            variant = rnd.choice([v for v in pool if v != last_variant])
+            last_variant, last_img = variant, img
             clip = clip_dir / f"{i:04d}.mp4"
-            ken_burns(segments[i][0], fr[j] + (xf if j < len(idx) - 1 else 0), clip, w, h, variant)
+            ken_burns(img, fr[j] + (xf if j < len(idx) - 1 else 0), clip, w, h, variant)
             clips.append(clip)
         part = clip_dir / f"group{gi:03d}.mp4"
         _render_group(clips, fr, xf, part, titles.get(g), fade_in=True, fade_out=True)
@@ -140,13 +168,27 @@ def pick_music() -> pathlib.Path | None:
     return random.choice(files) if files else None
 
 
-def mux(video: pathlib.Path, narration: pathlib.Path, out: pathlib.Path, music: bool = True) -> None:
-    track = pick_music() if music else None
+def mux(video: pathlib.Path, narration: pathlib.Path, out: pathlib.Path, music: bool = True,
+        chapter_starts: list[float] | None = None) -> None:
+    """Video + narration + a quiet music bed (a file from assets/music if present, else a synthesised one).
+    The bed is also ducked a little further whenever the narrator speaks."""
+    track, premixed = (pick_music(), False) if music else (None, False)
+    if music and track is None and CFG["video"].get("generated_music", True):
+        from .music import make_bed
+        try:
+            track = make_bed(duration(narration), chapter_starts or [], out.parent / "_music.wav", seed=str(out.parent))
+            premixed = True
+        except Exception as exc:  # noqa: BLE001 - music is optional, never lose the episode over it
+            log(f"music bed failed, continuing without music: {str(exc)[:200]}")
+            track = None
     cmd = ["ffmpeg", "-y", "-i", str(video), "-i", str(narration)]
     if track:
-        vol = CFG["video"]["music_volume"]
-        cmd += ["-stream_loop", "-1", "-i", str(track), "-filter_complex",
-                f"[2:a]volume={vol},aresample=44100[m];[1:a][m]amix=inputs=2:duration=first:normalize=0[a]",
+        vol = 1.0 if premixed else CFG["video"]["music_volume"]
+        cmd += ([] if premixed else ["-stream_loop", "-1"]) + ["-i", str(track), "-filter_complex",
+                f"[1:a]asplit=2[v][key];[2:a]volume={vol},aresample=44100,aformat=channel_layouts=stereo[m];"
+                "[m][key]sidechaincompress=threshold=0.05:ratio=3:attack=200:release=1500[md];"
+                "[v]aformat=channel_layouts=stereo[vs];"
+                "[vs][md]amix=inputs=2:duration=first:normalize=0[a]",
                 "-map", "0:v", "-map", "[a]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a"]

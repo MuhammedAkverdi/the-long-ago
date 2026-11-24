@@ -120,7 +120,7 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
               if CFG["video"].get("chapter_titles", True) else {})
     render.slideshow(segs, silent, w, h, groups=groups, titles=titles)
     final = folder / "final.mp4"
-    render.mux(silent, narration, final)
+    render.mux(silent, narration, final, chapter_starts=starts)
 
     cues = []
     for c, s, d in zip(script["chapters"], starts, durs):
@@ -132,7 +132,8 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
                    fallback=all_imgs[0] if all_imgs else None)
     description = build_description(script, starts)
     (folder / "metadata.md").write_text(
-        f"# {script['title']}\n\n## Description\n\n{description}\n\n## Tags\n\n{', '.join(script['tags'])}\n",
+        f"# {script['title']}\n\n## Title options\n\n" + "".join(f"- {t}\n" for t in script.get("title_options", []))
+        + f"\n## Description\n\n{description}\n\n## Tags\n\n{', '.join(script['tags'])}\n",
         encoding="utf-8")
 
     shorts = []
@@ -143,7 +144,7 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
             log(f"short {i} failed: {exc}")
 
     record = {"slug": slug, "type": "episode", "topic": topic, "title": script["title"],
-              "structure": script["structure"], "minutes": round(total / 60, 1),
+              "title_options": script.get("title_options", []), "structure": script["structure"], "minutes": round(total / 60, 1),
               "fact_check": script.get("fact_check", "-"),
               "description": description, "tags": script["tags"] + CFG["channel"]["default_tags"],
               "shorts": shorts, "status": "produced", "created": dt.datetime.now(dt.timezone.utc).isoformat()}

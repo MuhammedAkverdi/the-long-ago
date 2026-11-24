@@ -136,6 +136,10 @@ def quality_ok(path: pathlib.Path, prompt: str) -> bool:
             f"""You are the art director of a calm history documentary channel. The image was made for:
 "{prompt[:500]}". Reject it only for clear defects: deformed hands/faces/limbs, extra fingers, garbled
 text or letters, modern objects, photorealistic look, nudity or gore, or a scene that does not match.
+Also reject clear anachronisms and wrong places: glass drinking glasses or foaming beer in a period
+without them, famous landmarks that do not belong in this scene (e.g. Giza pyramids in a village
+scene that is not at Giza), crowns, royal headdresses or regalia on ordinary workers, modern paved
+roads, modern furniture, tools, clothing or lighting.
 Return JSON {{"ok": true/false, "score": 1-10, "problem": "short"}}"""], role="qc")
         ok = bool(verdict.get("ok", True)) and int(verdict.get("score", 7)) >= 6
         if not ok:
