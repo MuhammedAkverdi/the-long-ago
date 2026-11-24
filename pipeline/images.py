@@ -54,7 +54,7 @@ def _cloudflare(prompt: str, aspect: str) -> bytes:
             if r.status_code == 400 and "properties" in r.text:  # schema changed: send the prompt alone
                 r = requests.post(url, headers=headers, timeout=120, json={"prompt": text})
         if r.status_code == 429 or (r.status_code >= 400 and "neuron" in r.text.lower()):
-            log(f"{model}: daily allowance used up, switching model")
+            log(f"{model}: daily allowance used up (HTTP {r.status_code}: {r.text[:300]}), switching model")
             _disabled.add(model)
             last = QuotaError(f"{model} quota")
             continue
