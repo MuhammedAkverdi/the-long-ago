@@ -74,6 +74,10 @@ video:
   seconds_per_image: 27             # ~60 görsel/bölüm (kota biterse ertesi gün kaldığı yerden devam eder)
   shot_seconds: 10                  # her görsel ~10 sn'lik farklı kadrajlara bölünür (görüntü sık değişir)
   zoom_supersample: 2
+  motion: "parallax"                # "parallax" = derinlikli 2.5D kamera (resmin önü/arkası ayrı kayar), "kenburns" = eski düz hareket
+  parallax_strength: 0.018          # derinlik etkisinin gücü (0.01 hafif, 0.03 güçlü)
+  atmosphere: true                  # sahneye göre toz, kıvılcım, sis, mum titremesi
+  render_workers: 3                 # aynı anda işlenen çekim sayısı
   crossfade: 0.8                    # sahne geçişi (saniye)
   grain: 3                          # film dokusu (0 = kapalı)
   chapter_titles: true
@@ -94,6 +98,8 @@ colab:                              # isteğe bağlı: Colab not defteri açıks
   heartbeat_minutes: 12             # not defterinden bu kadar süre ses gelmezse Cloudflare'e geçilir
   remote_claim_minutes: 25          # Colab API ile sistem kendi açınca: makine + kurulum + model yükleme süresi
   remote_max_minutes: 180           # Colab makinesi en fazla bu kadar açık kalır, sonra silinir
+  video_clips: 8                    # resimlerden sonra kaç kilit sahne 5 sn'lik videoya çevrilsin (0 = kapalı)
+  clips_wait_minutes: 60            # not defteri klip üretirken en fazla bu kadar beklenir
 
 production:
   produce_weekdays: [1, 3]         # Salı, Perşembe (0 = Pazartesi). Diğer günler yalnızca kotası biten bölüme devam edilir.

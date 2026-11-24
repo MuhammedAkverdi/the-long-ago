@@ -114,13 +114,17 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
     for i, c in enumerate(script["chapters"]):
         chapter_imgs.append(images.generate_many(c["image_prompts"], folder / "img" / f"ch{i:02d}"))
 
+    colab.collect_clips(folder, slug)  # short animated scenes from the notebook, if it made any
+
     log("render")
     silent = folder / "silent.mp4"
+    prompts = {img: str(p) for c, imgs in zip(script["chapters"], chapter_imgs)
+               for img, p in zip(imgs, c["image_prompts"])}
     segs = _segments(chapter_imgs, starts, durs, total)
     groups = [i for i, imgs in enumerate(chapter_imgs) for _ in imgs]
     titles = ({i: c["heading"] for i, c in enumerate(script["chapters"]) if i > 0}
               if CFG["video"].get("chapter_titles", True) else {})
-    render.slideshow(segs, silent, w, h, groups=groups, titles=titles)
+    render.slideshow(segs, silent, w, h, groups=groups, titles=titles, prompts=prompts)
     hook = manual.hook(slug)
     if hook:
         hooked = folder / "silent_hook.mp4"

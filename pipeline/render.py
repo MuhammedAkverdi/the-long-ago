@@ -4,6 +4,7 @@ from __future__ import annotations
 import pathlib
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import CFG, ROOT, duration, log, run
 
@@ -121,14 +122,54 @@ def _render_group(clips: list[pathlib.Path], frames: list[int], xf: int, out: pa
          "-r", str(fps), *_enc(), out.name], cwd=out.parent)
 
 
+def clip_shot(clip: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int) -> None:
+    """A shot from a generated video clip: slowed down at most 2x to fill the shot, then held."""
+    fps = CFG["video"]["fps"]
+    need = frames / fps
+    have = max(duration(clip), 0.5)
+    slow = min(2.0, max(1.0, need / have))
+    vf = (f"setpts={slow:.4f}*(PTS-STARTPTS),fps={fps},scale={w}:{h}:force_original_aspect_ratio=increase,"
+          f"crop={w}:{h},setsar=1,tpad=stop_mode=clone:stop_duration={need + 1:.2f},vignette=angle=PI/6,format=yuv420p")
+    run(["ffmpeg", "-y", "-i", str(clip), "-an", "-vf", vf, "-frames:v", str(frames), "-r", str(fps), *_enc(), str(out)])
+
+
+def _shot(img: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int, variant: int,
+          prompt: str, first_of_image: bool) -> None:
+    """One shot: a generated video clip if there is one for this picture, else a 2.5D move, else Ken Burns."""
+    clip = img.with_name(img.stem + ".clip.mp4")
+    if first_of_image and clip.exists() and clip.stat().st_size > 10000:
+        try:
+            clip_shot(clip, frames, out, w, h)
+            return
+        except Exception as exc:  # noqa: BLE001
+            log(f"clip {clip.name} unusable ({str(exc)[:120]}); using the still")
+    if CFG["video"].get("motion", "parallax") == "parallax":
+        try:
+            from . import motion
+            atmos = motion.atmosphere_for(prompt) if CFG["video"].get("atmosphere", True) else set()
+            motion.render(img, frames, out, w, h, variant, atmos)
+            return
+        except Exception as exc:  # noqa: BLE001 - never lose a render: fall back to the plain move
+            log(f"2.5D move failed for {img.name} ({str(exc)[:160]}); using Ken Burns")
+    ken_burns(img, frames, out, w, h, variant)
+
+
 def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Path, w: int, h: int,
-              groups: list[int] | None = None, titles: dict[int, str] | None = None) -> None:
+              groups: list[int] | None = None, titles: dict[int, str] | None = None,
+              prompts: dict[pathlib.Path, str] | None = None) -> None:
     """segments: (image, start_s, end_s) covering the timeline back-to-back.
     groups: group id per segment (e.g. chapter); dissolves inside a group, dip-to-black between groups."""
     fps = CFG["video"]["fps"]
     groups = groups or [0] * len(segments)
     titles = titles or {}
     segments, groups = shots(segments, groups, float(CFG["video"].get("shot_seconds", 0)))
+    if CFG["video"].get("motion", "parallax") == "parallax":
+        try:  # depth maps once per picture, before the shots are rendered in parallel
+            from . import motion
+            for img in dict.fromkeys(seg[0] for seg in segments):
+                motion.depth(img)
+        except Exception as exc:  # noqa: BLE001
+            log(f"depth maps skipped ({str(exc)[:120]})")
     clip_dir = out.parent / f"_clips_{out.stem}"
     clip_dir.mkdir(exist_ok=True)
     rnd = random.Random(str(out))
@@ -138,7 +179,7 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
     for g in groups:
         if g not in order:
             order.append(g)
-    parts, last_variant, last_img = [], -1, None
+    parts, last_variant, last_img, prev_img, jobs = [], -1, None, None, []
     for gi, g in enumerate(order):
         idx = [i for i, gg in enumerate(groups) if gg == g and frames[i] > 0]
         if not idx:
@@ -152,8 +193,14 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
             variant = rnd.choice([v for v in pool if v != last_variant])
             last_variant, last_img = variant, img
             clip = clip_dir / f"{i:04d}.mp4"
-            ken_burns(img, fr[j] + (xf if j < len(idx) - 1 else 0), clip, w, h, variant)
+            jobs.append((img, fr[j] + (xf if j < len(idx) - 1 else 0), clip, w, h, variant,
+                         (prompts or {}).get(img, ""), img != prev_img))
+            prev_img = img
             clips.append(clip)
+        with ThreadPoolExecutor(max_workers=int(CFG["video"].get("render_workers", 3))) as pool:
+            for fut in [pool.submit(_shot, *job) for job in jobs]:
+                fut.result()  # re-raise the first failure
+        jobs.clear()
         part = clip_dir / f"group{gi:03d}.mp4"
         _render_group(clips, fr, xf, part, titles.get(g), fade_in=True, fade_out=True)
         parts.append(part)

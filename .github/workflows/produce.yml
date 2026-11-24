@@ -29,7 +29,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         with:
           path: ~/.cache/huggingface
-          key: hf-kokoro-v1
+          key: hf-kokoro-depth-v2
       - name: Restore unfinished episode work
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache/restore@v4

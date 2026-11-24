@@ -41,7 +41,19 @@ def job_for(slug: str, script: dict) -> dict:
         for k, p in enumerate((s.get("image_prompts") or ["an ordinary household scene"])[:6]):
             items.append({"path": f"short{s_i}/img/{k:03d}.png", "prompt": images.full_prompt(str(p), "9:16"),
                           "aspect": "9:16"})
-    return {"slug": slug, "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "images": items}
+    videos = []
+    n_clips = int(_cfg().get("video_clips", 0))
+    if n_clips > 0:  # opening scenes first (the hook), then the first scene of each later chapter
+        picks = [(0, k) for k in range(min(2, len(script["chapters"][0]["image_prompts"])))]
+        picks += [(i, 0) for i in range(1, len(script["chapters"]))]
+        for i, k in picks[:n_clips]:
+            prompt = str(script["chapters"][i]["image_prompts"][k])
+            videos.append({"path": f"img/ch{i:02d}/{k:03d}.clip.mp4", "image": f"img/ch{i:02d}/{k:03d}.png",
+                           "prompt": f"{prompt}. Subtle, slow, natural motion: people move calmly, fire and smoke "
+                                     "drift, gentle slow camera move. Painterly historical illustration style, "
+                                     "no text."})
+    return {"slug": slug, "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "images": items, "videos": videos}
 
 
 def _asset_info(tag: str) -> dict[str, float]:
@@ -77,8 +89,9 @@ def offer(folder: pathlib.Path, slug: str, script: dict) -> bool:
         job = job_for(slug, script)
         job["images"] = [i for i in job["images"]  # hand-made pictures already in place are not redrawn
                          if not ((folder / i["path"]).exists() and (folder / i["path"]).stat().st_size > 1000)]
+        job["videos"] = [v for v in job.get("videos", []) if any(i["path"] == v["image"] for i in job["images"])]
         if not job["images"]:  # nothing left to draw: don't make a notebook load the model for nothing
-            write_json(marker, {"paths": []})
+            write_json(marker, {"paths": [], "videos": []})
             return False
         for name in _assets(JOBS_TAG):  # only one episode is produced at a time: drop stale jobs first
             if name.endswith(".json") and name != f"{slug}.json":
@@ -88,7 +101,7 @@ def offer(folder: pathlib.Path, slug: str, script: dict) -> bool:
             path = pathlib.Path(tmp) / f"{slug}.json"
             path.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
             github.release(JOBS_TAG, "Colab jobs", "Image jobs for the optional Colab notebook", [path])
-        write_json(marker, {"paths": [i["path"] for i in job["images"]]})
+        write_json(marker, {"paths": [i["path"] for i in job["images"]], "videos": [v["path"] for v in job["videos"]]})
         log(f"colab: job published ({len(job['images'])} images)")
         return True
     except Exception as exc:  # noqa: BLE001
@@ -148,6 +161,55 @@ def _collect(folder: pathlib.Path, slug: str, remote) -> int:
         return 0
 
 
+def collect_clips(folder: pathlib.Path, slug: str) -> int:
+    """Wait (while the notebook keeps reporting progress) for its short video clips and unpack them next to
+    the pictures they animate. Only clips of pictures that really came from the notebook are used."""
+    if MOCK or not _cfg().get("enabled"):
+        return 0
+    try:
+        job = json.loads((folder / "colab_job.json").read_text(encoding="utf-8"))
+        wanted = job.get("videos") or []
+        made = set(json.loads((folder / "colab_unpacked.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return 0
+    wanted = [v for v in wanted if v.replace(".clip.mp4", ".png") in made and not (folder / v).exists()]
+    if not wanted:
+        return 0
+    tag = f"colab-{slug}"
+    try:
+        deadline = time.time() + 60 * float(_cfg().get("clips_wait_minutes", 60))
+        stale_after = 60 * float(_cfg().get("heartbeat_minutes", 12))
+        info = _asset_info(tag)
+        while "clips.zip" not in info and "clips.none" not in info and time.time() < deadline:
+            beat = max([info[n] for n in ("images.zip", "progress.txt") if n in info], default=0)
+            if time.time() - beat > stale_after:
+                log("colab: no video clips coming (notebook stopped)")
+                return 0
+            log("colab: notebook is animating scenes; waiting")
+            time.sleep(60)
+            info = _asset_info(tag)
+        if "clips.zip" not in info:
+            return 0
+        root, count = folder.resolve(), 0
+        with tempfile.TemporaryDirectory() as tmp:
+            github.download_release(tag, "clips.zip", pathlib.Path(tmp))
+            with zipfile.ZipFile(pathlib.Path(tmp) / "clips.zip") as zf:
+                for name in zf.namelist():
+                    if name not in wanted:
+                        continue
+                    out = (root / name).resolve()
+                    if root not in out.parents:
+                        continue
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(zf.read(name))
+                    count += 1
+        log(f"colab: {count} animated scene(s) ready")
+        return count
+    except Exception as exc:  # noqa: BLE001 - clips are a bonus
+        log(f"colab: video clips skipped ({str(exc)[:200]})")
+        return 0
+
+
 def pending_paths(folder: pathlib.Path) -> list[str]:
     """Job images that are not in the episode folder yet."""
     try:
@@ -159,7 +221,7 @@ def pending_paths(folder: pathlib.Path) -> list[str]:
 
 def _unpack(zip_path: pathlib.Path, folder: pathlib.Path) -> int:
     root = folder.resolve()
-    count = 0
+    count, from_nb = 0, []
     with zipfile.ZipFile(zip_path) as zf:
         for name in zf.namelist():
             rel = pathlib.PurePosixPath(name)
@@ -175,7 +237,14 @@ def _unpack(zip_path: pathlib.Path, folder: pathlib.Path) -> int:
             out.parent.mkdir(parents=True, exist_ok=True)
             img.save(out)
             count += 1
+            from_nb.append(str(rel.with_suffix(".png")))
     log(f"colab: {count} notebook images ready")
+    done = folder / "colab_unpacked.json"
+    try:
+        old = json.loads(done.read_text(encoding="utf-8")) if done.exists() else []
+    except (OSError, ValueError):
+        old = []
+    write_json(done, sorted(set(old) | set(from_nb)))
     return count
 
 

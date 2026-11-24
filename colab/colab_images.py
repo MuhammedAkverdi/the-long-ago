@@ -16,7 +16,7 @@ import sys
 
 subprocess.check_call([
     sys.executable, "-m", "pip", "install", "-q",
-    "diffusers>=0.43.0", "transformers", "accelerate",
+    "diffusers>=0.43.0", "transformers", "accelerate", "imageio", "imageio-ffmpeg", "ftfy",
 ])
 print("Kurulum tamam ✓")
 
@@ -50,6 +50,17 @@ JPEG_QUALITY = 92
 PREVIEW_EVERY = 0 if HEADLESS else 10  # her N resimde bir küçük önizleme göster (0 = kapalı)
 
 WORK_DIR = "/content/the_long_ago_work"
+
+# Resimler bittikten sonra birkaç kilit sahneyi 5 sn'lik videoya çevirir (Apache-2.0 model).
+VIDEO_CLIPS = True
+VIDEO_MODEL_ID = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+VIDEO_SIZE = (1280, 704)        # (genişlik, yükseklik) - modelin 720p boyutu
+VIDEO_FRAMES = 121              # 24 fps'te ~5 sn
+VIDEO_STEPS = 30
+VIDEO_GUIDANCE = 5.0
+VIDEO_MAX_MINUTES = 50          # bu süre dolunca kalan klipler atlanır (birim harcaması sınırlı kalsın)
+VIDEO_NEGATIVE = ("text, letters, watermark, subtitles, deformed hands, extra fingers, distorted face, "
+                  "flicker, jitter, fast motion, modern objects, blurry, low quality")
 
 # %% Yardımcı fonksiyonlar
 import io
@@ -333,26 +344,44 @@ try:
 except ImportError:
     from diffusers import DiffusionPipeline as _Pipe
 
-pipe, _err = None, None
-for _mid in [MODEL_ID] + MODEL_ID_FALLBACKS:
-    try:
-        pipe = _Pipe.from_pretrained(_mid, torch_dtype=torch.bfloat16)
-        MODEL_ID = _mid
-        break
-    except Exception as e:  # repo moved/renamed: try the next name
-        _err = e
-        print(f"{_mid} yüklenemedi: {str(e)[:150]}")
-if pipe is None:
-    stop_runtime("Model yüklenemedi.")
-    raise RuntimeError(f"Model yüklenemedi: {_err}")
+pipe = None
 
-if vram_gb < 30:
-    pipe.enable_model_cpu_offload()
-    print("VRAM 30 GB altında: CPU offload açık (biraz daha yavaş).")
-else:
-    pipe.to("cuda")
-pipe.set_progress_bar_config(disable=True)
-print(f"Model yüklendi ✓ ({MODEL_ID})")
+
+def load_image_pipe():
+    """Load the picture model (again, if the video model was loaded in between)."""
+    global pipe, MODEL_ID, _video_pipe
+    if pipe is not None:
+        return pipe
+    if _video_pipe is not None:  # free the video model first
+        import gc
+        _video_pipe = None
+        gc.collect()
+        torch.cuda.empty_cache()
+    err = None
+    for mid in [MODEL_ID] + MODEL_ID_FALLBACKS:
+        try:
+            p = _Pipe.from_pretrained(mid, torch_dtype=torch.bfloat16)
+            MODEL_ID = mid
+            break
+        except Exception as e:  # repo moved/renamed: try the next name
+            err, p = e, None
+            print(f"{mid} yüklenemedi: {str(e)[:150]}")
+    if p is None:
+        stop_runtime("Model yüklenemedi.")
+        raise RuntimeError(f"Model yüklenemedi: {err}")
+    if vram_gb < 30:
+        p.enable_model_cpu_offload()
+        print("VRAM 30 GB altında: CPU offload açık (biraz daha yavaş).")
+    else:
+        p.to("cuda")
+    p.set_progress_bar_config(disable=True)
+    pipe = p
+    print(f"Model yüklendi ✓ ({MODEL_ID})")
+    return pipe
+
+
+_video_pipe = None
+load_image_pipe()
 
 
 def generate(prompt, aspect, path):
@@ -361,7 +390,7 @@ def generate(prompt, aspect, path):
         raise ValueError(f"Bilinmeyen en-boy oranı: {aspect!r}")
     width, height = SIZES[aspect]
     generator = torch.Generator("cuda").manual_seed(seed_for(path))
-    return pipe(
+    return load_image_pipe()(
         prompt=prompt,
         width=width,
         height=height,
@@ -392,9 +421,13 @@ def process_job(job):
     zip_path = job_dir / "images.zip"
     started = time.time()
 
+    want_clip = {v["image"] for v in (job.get("videos") or [])} if VIDEO_CLIPS else set()
+    drawn = {}
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
         for i, (item, entry) in enumerate(zip(images, entries), 1):
             img = generate(item["prompt"], item.get("aspect", "16:9"), item["path"])
+            if item["path"] in want_clip:
+                drawn[item["path"]] = img.convert("RGB")
             buf = io.BytesIO()
             img.convert("RGB").save(buf, "JPEG", quality=JPEG_QUALITY)
             zf.writestr(entry, buf.getvalue())
@@ -418,6 +451,83 @@ def process_job(job):
             delete_asset(a["id"])
     upload_asset(release, "images.zip", zip_path.read_bytes(), "application/zip")
     print(f"  Yüklendi ✓ {slug} ({(time.time() - started) / 60:.1f} dk)")
+    if want_clip:
+        try:
+            make_clips(job, release, drawn, job_dir)
+        except Exception as exc:  # noqa: BLE001 - clips are a bonus: the episode already has its pictures
+            print(f"  Video klipler yapılamadı: {type(exc).__name__}: {str(exc)[:300]}")
+            try:
+                replace_asset(release, "clips.none", str(exc)[:500].encode(), "text/plain")
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def load_video_pipe():
+    """Free the picture model and load the image-to-video model (once)."""
+    global pipe, _video_pipe
+    if _video_pipe is not None:
+        return _video_pipe
+    import gc
+    pipe = None
+    gc.collect()
+    torch.cuda.empty_cache()
+    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+    vae = AutoencoderKLWan.from_pretrained(VIDEO_MODEL_ID, subfolder="vae", torch_dtype=torch.float32)
+    vp = WanImageToVideoPipeline.from_pretrained(VIDEO_MODEL_ID, vae=vae, torch_dtype=torch.bfloat16)
+    if vram_gb < 30:
+        vp.enable_model_cpu_offload()
+    else:
+        vp.to("cuda")
+    vp.set_progress_bar_config(disable=True)
+    _video_pipe = vp
+    print(f"Video modeli yüklendi ✓ ({VIDEO_MODEL_ID})")
+    return vp
+
+
+def fit(img, size):
+    """Cover-crop a PIL image to exactly `size`."""
+    from PIL import ImageOps
+    return ImageOps.fit(img, size)
+
+
+def make_clips(job, release, drawn, job_dir):
+    """Animate a few key pictures into ~5 s clips and upload them as clips.zip."""
+    from diffusers.utils import export_to_video
+    videos = [v for v in job.get("videos") or [] if v["image"] in drawn]
+    if not videos:
+        return
+    print(f"\n🎬 {len(videos)} sahne canlandırılıyor…")
+    vp = load_video_pipe()
+    started, made = time.time(), 0
+    zip_path = job_dir / "clips.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for n, v in enumerate(videos, 1):
+            if (time.time() - started) / 60 > VIDEO_MAX_MINUTES:
+                print(f"  Süre doldu ({VIDEO_MAX_MINUTES} dk); kalan klipler atlandı.")
+                break
+            entry = PurePosixPath(v["path"])
+            if entry.is_absolute() or ".." in entry.parts or entry.suffix != ".mp4":
+                continue
+            w, h = VIDEO_SIZE
+            frames = vp(image=fit(drawn[v["image"]], (w, h)), prompt=v["prompt"], negative_prompt=VIDEO_NEGATIVE,
+                        height=h, width=w, num_frames=VIDEO_FRAMES, num_inference_steps=VIDEO_STEPS,
+                        guidance_scale=VIDEO_GUIDANCE,
+                        generator=torch.Generator("cuda").manual_seed(seed_for(v["path"]))).frames[0]
+            out = job_dir / f"clip_{n:02d}.mp4"
+            export_to_video(frames, str(out), fps=24)
+            zf.write(out, str(entry))
+            made += 1
+            print(f"  Klip {n}/{len(videos)} hazır ({(time.time() - started) / 60:.1f} dk)")
+            try:
+                replace_asset(release, "progress.txt", f"clip {n}/{len(videos)} {now_utc().isoformat()}".encode(),
+                              "text/plain")
+            except Exception as e:  # noqa: BLE001
+                print(f"  (ilerleme bildirilemedi: {str(e)[:80]})")
+    if made:
+        upload_asset(release, "clips.zip", zip_path.read_bytes(), "application/zip")
+        print(f"  clips.zip yüklendi ✓ ({made} klip)")
+    else:
+        replace_asset(release, "clips.none", b"no clips", "text/plain")
 
 
 def main():
