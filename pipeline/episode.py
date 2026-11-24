@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 
-from . import colab, colab_remote, images, render, thumbnail, tts, youtube
+from . import colab, colab_remote, images, manual, render, thumbnail, tts, youtube
 from .config import CFG, WORK, duration, log, read_json, run, slugify, write_json
 from .script import build, pick_structure
 
@@ -83,6 +83,8 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
         script = build(topic, pick_structure(recent_structures), cache=folder / "steps")
         write_json(script_path, script)
 
+    manual.apply(folder, slug, script)  # hand-made opening pictures / thumbnail, if any
+
     remote = None
     if (colab.offer(folder, slug, script) and colab.pending_paths(folder)
             and "images.zip" not in colab._assets(f"colab-{slug}")):  # Colab draws while narration is voiced
@@ -119,6 +121,12 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
     titles = ({i: c["heading"] for i, c in enumerate(script["chapters"]) if i > 0}
               if CFG["video"].get("chapter_titles", True) else {})
     render.slideshow(segs, silent, w, h, groups=groups, titles=titles)
+    hook = manual.hook(slug)
+    if hook:
+        hooked = folder / "silent_hook.mp4"
+        if render.overlay_hook(silent, hook, hooked, w, h):
+            hooked.replace(silent)
+            log(f"hook clip laid over the opening ({hook.name})")
     final = folder / "final.mp4"
     render.mux(silent, narration, final, chapter_starts=starts)
 

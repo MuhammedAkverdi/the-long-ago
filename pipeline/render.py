@@ -163,6 +163,27 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listfile), "-c", "copy", str(out)])
 
 
+def overlay_hook(video: pathlib.Path, clip: pathlib.Path, out: pathlib.Path, w: int, h: int,
+                 max_seconds: float = 15.0) -> bool:
+    """Lay a hand-made clip over the first seconds of the silent episode video, then dissolve back.
+    Returns False (and leaves `out` unwritten) if anything goes wrong."""
+    try:
+        d = min(duration(clip), max_seconds, duration(video) - 1)
+        if d < 2:
+            return False
+        fade = min(1.0, d / 4)
+        graph = (f"[1:v]trim=0:{d:.3f},setpts=PTS-STARTPTS,fps={CFG['video']['fps']},"
+                 f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,format=yuva420p,"
+                 f"fade=t=out:st={d - fade:.3f}:d={fade:.3f}:alpha=1[hk];"
+                 "[0:v][hk]overlay=eof_action=pass:shortest=0,format=yuv420p[v]")
+        run(["ffmpeg", "-y", "-i", str(video), "-i", str(clip), "-filter_complex", graph, "-map", "[v]", "-an",
+             *_enc(), str(out)])
+        return out.exists() and abs(duration(out) - duration(video)) < 1.0
+    except Exception as exc:  # noqa: BLE001 - the hook is a bonus: keep the plain video
+        log(f"hook clip skipped: {str(exc)[:200]}")
+        return False
+
+
 def pick_music() -> pathlib.Path | None:
     files = [p for p in (ROOT / "assets" / "music").glob("*") if p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"}]
     return random.choice(files) if files else None
