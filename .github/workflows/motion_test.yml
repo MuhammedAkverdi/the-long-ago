@@ -23,7 +23,7 @@ jobs:
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q -r requirements.txt
       - name: Render test shots
-        run: python scripts/motion_test.py
+        run: PYTHONPATH=. python scripts/motion_test.py
       - uses: actions/upload-artifact@v4
         with:
           name: motion-test
