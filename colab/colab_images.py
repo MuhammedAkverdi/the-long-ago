@@ -412,6 +412,9 @@ def process_job(job):
     entries = [safe_entry_name(item["path"]) for item in images]  # check all paths first
 
     release = ensure_release(RESULT_TAG_PREFIX + slug)
+    for a in list_assets(release):  # leftovers of an earlier attempt would mislead the pipeline
+        if a["name"] in ("clips.zip", "clips.none", "clips.started"):
+            delete_asset(a["id"])
     replace_asset(release, "claimed.txt",
                   now_utc().isoformat().encode(), "text/plain")
     print("  İş sahiplenildi ✓")
@@ -476,6 +479,10 @@ def load_video_pipe():
     vp = WanImageToVideoPipeline.from_pretrained(VIDEO_MODEL_ID, vae=vae, torch_dtype=torch.bfloat16)
     if vram_gb < 30:
         vp.enable_model_cpu_offload()
+        try:
+            vp.vae.enable_tiling()  # decoding 121 frames at 720p is tight on 24 GB cards
+        except Exception:  # noqa: BLE001
+            pass
     else:
         vp.to("cuda")
     vp.set_progress_bar_config(disable=True)
@@ -492,11 +499,30 @@ def fit(img, size):
 
 def make_clips(job, release, drawn, job_dir):
     """Animate a few key pictures into ~5 s clips and upload them as clips.zip."""
-    from diffusers.utils import export_to_video
     videos = [v for v in job.get("videos") or [] if v["image"] in drawn]
     if not videos:
         return
     print(f"\n🎬 {len(videos)} sahne canlandırılıyor…")
+    replace_asset(release, "clips.started", now_utc().isoformat().encode(), "text/plain")
+    import threading
+    stop_beat = threading.Event()
+
+    def beat():  # model download + first clip take a while: keep telling the pipeline we're alive
+        while not stop_beat.wait(150):
+            try:
+                replace_asset(release, "progress.txt", f"clips {now_utc().isoformat()}".encode(), "text/plain")
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=beat, daemon=True).start()
+    try:
+        _make_clips(videos, release, drawn, job_dir)
+    finally:
+        stop_beat.set()
+
+
+def _make_clips(videos, release, drawn, job_dir):
+    from diffusers.utils import export_to_video
     vp = load_video_pipe()
     started, made = time.time(), 0
     zip_path = job_dir / "clips.zip"
@@ -518,13 +544,8 @@ def make_clips(job, release, drawn, job_dir):
             zf.write(out, str(entry))
             made += 1
             print(f"  Klip {n}/{len(videos)} hazır ({(time.time() - started) / 60:.1f} dk)")
-            try:
-                replace_asset(release, "progress.txt", f"clip {n}/{len(videos)} {now_utc().isoformat()}".encode(),
-                              "text/plain")
-            except Exception as e:  # noqa: BLE001
-                print(f"  (ilerleme bildirilemedi: {str(e)[:80]})")
     if made:
-        upload_asset(release, "clips.zip", zip_path.read_bytes(), "application/zip")
+        replace_asset(release, "clips.zip", zip_path.read_bytes(), "application/zip")
         print(f"  clips.zip yüklendi ✓ ({made} klip)")
     else:
         replace_asset(release, "clips.none", b"no clips", "text/plain")

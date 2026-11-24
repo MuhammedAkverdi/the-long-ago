@@ -127,9 +127,11 @@ def clip_shot(clip: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int
     fps = CFG["video"]["fps"]
     need = frames / fps
     have = max(duration(clip), 0.5)
-    slow = min(2.0, max(1.0, need / have))
+    slow = min(1.25, max(1.0, need / have))  # more slow-down would judder (repeated frames)
+    grain = CFG["video"].get("grain", 0)
     vf = (f"setpts={slow:.4f}*(PTS-STARTPTS),fps={fps},scale={w}:{h}:force_original_aspect_ratio=increase,"
-          f"crop={w}:{h},setsar=1,tpad=stop_mode=clone:stop_duration={need + 1:.2f},vignette=angle=PI/6,format=yuv420p")
+          f"crop={w}:{h},setsar=1,tpad=stop_mode=clone:stop_duration={need + 1:.2f},vignette=angle=PI/6"
+          + (f",noise=alls={grain}:allf=t" if grain else "") + ",format=yuv420p")
     run(["ffmpeg", "-y", "-i", str(clip), "-an", "-vf", vf, "-frames:v", str(frames), "-r", str(fps), *_enc(), str(out)])
 
 
@@ -137,7 +139,8 @@ def _shot(img: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int, var
           prompt: str, first_of_image: bool) -> None:
     """One shot: a generated video clip if there is one for this picture, else a 2.5D move, else Ken Burns."""
     clip = img.with_name(img.stem + ".clip.mp4")
-    if first_of_image and clip.exists() and clip.stat().st_size > 10000:
+    redrawn = img.with_suffix(".rejected.png").exists()  # the notebook picture was replaced: clip no longer matches
+    if first_of_image and not redrawn and clip.exists() and clip.stat().st_size > 10000:
         try:
             clip_shot(clip, frames, out, w, h)
             return

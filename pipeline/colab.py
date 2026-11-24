@@ -44,8 +44,9 @@ def job_for(slug: str, script: dict) -> dict:
     videos = []
     n_clips = int(_cfg().get("video_clips", 0))
     if n_clips > 0:  # opening scenes first (the hook), then the first scene of each later chapter
-        picks = [(0, k) for k in range(min(2, len(script["chapters"][0]["image_prompts"])))]
-        picks += [(i, 0) for i in range(1, len(script["chapters"]))]
+        chs = script["chapters"]
+        picks = [(0, k) for k in range(min(2, len(chs[0].get("image_prompts") or [])))] if chs else []
+        picks += [(i, 0) for i in range(1, len(chs)) if chs[i].get("image_prompts")]
         for i, k in picks[:n_clips]:
             prompt = str(script["chapters"][i]["image_prompts"][k])
             videos.append({"path": f"img/ch{i:02d}/{k:03d}.clip.mp4", "image": f"img/ch{i:02d}/{k:03d}.png",
@@ -116,8 +117,15 @@ def collect(folder: pathlib.Path, slug: str, remote=None) -> int:
     try:
         return _collect(folder, slug, remote)
     finally:
-        if remote is not None:
-            remote.stop()
+        if remote is not None and not _wants_clips(folder):
+            remote.stop()  # with clips to come, collect_clips stops it once they are in
+
+
+def _wants_clips(folder: pathlib.Path) -> bool:
+    try:
+        return bool(json.loads((folder / "colab_job.json").read_text(encoding="utf-8")).get("videos"))
+    except (OSError, ValueError):
+        return False
 
 
 def _collect(folder: pathlib.Path, slug: str, remote) -> int:
@@ -161,9 +169,18 @@ def _collect(folder: pathlib.Path, slug: str, remote) -> int:
         return 0
 
 
-def collect_clips(folder: pathlib.Path, slug: str) -> int:
+def collect_clips(folder: pathlib.Path, slug: str, remote=None) -> int:
     """Wait (while the notebook keeps reporting progress) for its short video clips and unpack them next to
-    the pictures they animate. Only clips of pictures that really came from the notebook are used."""
+    the pictures they animate. Only clips of pictures that really came from the notebook are used.
+    A runtime the pipeline started itself is stopped here, as soon as the clips are in (or not coming)."""
+    try:
+        return _collect_clips(folder, slug)
+    finally:
+        if remote is not None:
+            remote.stop()
+
+
+def _collect_clips(folder: pathlib.Path, slug: str) -> int:
     if MOCK or not _cfg().get("enabled"):
         return 0
     try:
@@ -180,8 +197,19 @@ def collect_clips(folder: pathlib.Path, slug: str) -> int:
         deadline = time.time() + 60 * float(_cfg().get("clips_wait_minutes", 60))
         stale_after = 60 * float(_cfg().get("heartbeat_minutes", 12))
         info = _asset_info(tag)
+        if "images.zip" not in info:
+            return 0  # the notebook did not deliver pictures, so no clips either
+        # a notebook that makes clips announces it (clips.started) right after images.zip; an older one never does
+        grace = info["images.zip"] + 300
+        while "clips.started" not in info and "clips.zip" not in info and "clips.none" not in info \
+                and time.time() < grace:
+            time.sleep(30)
+            info = _asset_info(tag)
+        if "clips.started" not in info and "clips.zip" not in info:
+            log("colab: notebook is not making video clips")
+            return 0
         while "clips.zip" not in info and "clips.none" not in info and time.time() < deadline:
-            beat = max([info[n] for n in ("images.zip", "progress.txt") if n in info], default=0)
+            beat = max([info[n] for n in ("clips.started", "progress.txt") if n in info], default=0)
             if time.time() - beat > stale_after:
                 log("colab: no video clips coming (notebook stopped)")
                 return 0

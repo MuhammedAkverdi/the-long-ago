@@ -114,7 +114,7 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
     for i, c in enumerate(script["chapters"]):
         chapter_imgs.append(images.generate_many(c["image_prompts"], folder / "img" / f"ch{i:02d}"))
 
-    colab.collect_clips(folder, slug)  # short animated scenes from the notebook, if it made any
+    colab.collect_clips(folder, slug, remote)  # short animated scenes from the notebook, if it made any
 
     log("render")
     silent = folder / "silent.mp4"

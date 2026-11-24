@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 import random
+import re
 import subprocess
 
 import numpy as np
@@ -43,7 +44,7 @@ ATMOS_WORDS = {
 
 def atmosphere_for(prompt: str) -> set[str]:
     p = (prompt or "").lower()
-    kinds = {k for k, words in ATMOS_WORDS.items() if any(w in p for w in words)}
+    kinds = {k for k, words in ATMOS_WORDS.items() if any(re.search(rf"\b{w}", p) for w in words)}
     return kinds or {"dust"}
 
 
@@ -76,7 +77,13 @@ def depth(img: pathlib.Path) -> np.ndarray | None:
     try:
         from PIL import Image
         pic = Image.open(img).convert("RGB")
-        out = np.asarray(pipe(pic)["depth"], dtype=np.float32)
+        res = pipe(pic)
+        pred = res.get("predicted_depth")
+        if pred is not None:  # float output: no 8-bit banding
+            out = np.asarray(pred.squeeze().detach().cpu().numpy() if hasattr(pred, "detach") else pred,
+                             dtype=np.float32)
+        else:
+            out = np.asarray(res["depth"], dtype=np.float32)
         if out.ndim == 3:
             out = out[..., 0]
         out = cv2.resize(out, pic.size, interpolation=cv2.INTER_CUBIC)
@@ -126,7 +133,8 @@ class _Particles:
             tw = .6 + .4 * np.sin(f * .08 + ph)
             if self.kind == "embers":
                 fade = min(1.0, life * 6) * (1 - life)
-                col = (40 * a * fade * 4, 140 * a * fade * 4, 255 * a * fade * 4)  # BGR orange
+                k = min(1.0, a * fade * 2)
+                col = (30 * k, 120 * k, 255 * k)  # BGR orange
             else:
                 v = 200 * a * tw
                 col = (v * .85, v * .95, v)
@@ -143,7 +151,7 @@ def render(img: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int, va
     pic = cv2.imread(str(img), cv2.IMREAD_COLOR)
     if pic is None:
         raise RuntimeError(f"cannot read {img}")
-    over = 1.25  # source is prepared 25% larger than the frame: room for parallax and zoom
+    over = 1.12  # source is prepared 12% larger than the frame: room for parallax and pans
     sw, sh = int(w * over), int(h * over)
     scale = max(sw / pic.shape[1], sh / pic.shape[0])
     rw, rh = max(sw, round(pic.shape[1] * scale)), max(sh, round(pic.shape[0] * scale))
@@ -163,7 +171,7 @@ def render(img: pathlib.Path, frames: int, out: pathlib.Path, w: int, h: int, va
     hw, hh = w // 2, h // 2
     gu, gv = np.meshgrid((np.arange(hw, dtype=np.float32) + .5) / hw - .5,
                          (np.arange(hh, dtype=np.float32) + .5) / hh - .5)
-    view_w, view_h = w, h  # at zoom 1 the frame shows w x h source pixels (source is 25% larger)
+    view_w, view_h = w, h  # at zoom 1 the frame shows w x h source pixels (source is 12% larger)
 
     atmos = atmos or set()
     parts = [_Particles(k, w, h, rnd) for k in ("dust", "embers") if k in atmos]
