@@ -312,3 +312,25 @@ def burn_subtitles(video: pathlib.Path, srt: pathlib.Path, out: pathlib.Path) ->
     run(["ffmpeg", "-y", "-i", str(video.resolve()), "-vf", f"subtitles={srt.name}{extra}:force_style='{style}'",
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "copy",
          "-movflags", "+faststart", str(out.resolve())], cwd=srt.parent)
+
+
+def ambient_tail(img: pathlib.Path, minutes: float, out: pathlib.Path) -> pathlib.Path:
+    """A quiet rain-like tail for sleep compilations: one dim still picture over soft synthesized
+    noise (no samples, so nothing to license). Encoded like the episodes so it concatenates by copy."""
+    v = CFG["video"]
+    secs = max(60, int(minutes * 60))
+    w, h, fps = v["width"], v["height"], v["fps"]
+    audio = (f"anoisesrc=color=pink:amplitude=0.5:sample_rate=44100:duration={secs},"
+             "highpass=f=300,lowpass=f=5000,volume=0.55[rain];"
+             f"anoisesrc=color=brown:amplitude=0.5:sample_rate=44100:duration={secs},"
+             "lowpass=f=200,volume=0.35[rumble];"
+             f"[rain][rumble]amix=inputs=2:normalize=0,afade=t=in:d=8,afade=t=out:st={secs - 30}:d=30,"
+             "aformat=channel_layouts=stereo[a]")
+    video = (f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,"
+             f"eq=brightness=-0.18:saturation=0.7,fps={fps},format=yuv420p,"
+             f"fade=t=in:d=3,fade=t=out:st={secs - 10}:d=10[v]")
+    run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(fps), "-t", str(secs), "-i", str(img),
+         "-filter_complex", f"{video};{audio}", "-map", "[v]", "-map", "[a]", "-t", str(secs),
+         *_enc(), "-tune", "stillimage", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+         "-movflags", "+faststart", str(out)])
+    return out

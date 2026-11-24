@@ -132,3 +132,4 @@ production:
 compilation:
   min_episodes: 3
   target_minutes: 150
+  ambient_tail_minutes: 20          # derlemenin sonuna 20 dk yağmur sesi + loş görsel (uyku kanallarında standart; 0 = kapalı)

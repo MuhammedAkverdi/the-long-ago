@@ -15,6 +15,13 @@ Good titles are curiosity questions or "you" scenarios: "What Did Medieval Peasa
 All Day?", "Why You Wouldn't Last a Week as a Roman Baker", "What Did People Do at Night Before
 Electricity?", "Why Nobody Wanted to Be a Victorian Lighthouse Keeper"."""
 
+WINNING_ANGLES = """Angles that reliably win in this niche (each is a family, not a template to copy):
+- surviving a harsh condition, with a concrete number: "How Did Vikings Sleep at -30°C?",
+  "How Did Sailors Sleep Through a Storm at Sea?"
+- living a specific role: "What Was It Like to Be a Palace Servant in Ottoman Istanbul?"
+- life without a modern thing: "How Did People Stay Warm Before Central Heating?"
+Sleep, cold, darkness, food and work are the strongest everyday subjects."""
+
 
 def topic_id(title: str) -> str:
     return hashlib.sha1(title.lower().encode()).hexdigest()[:8]
@@ -38,10 +45,13 @@ that fits the channel, make 1-2 of the topics about it and say so in the pitch (
 """
     prompt = f"""{CHANNEL_BRIEF}
 
+{WINNING_ANGLES}
+
 Propose {n} NEW episode topics. Rules:
 - Each is about everyday life of ordinary people in ONE specific place and period.
 - Mix eras and regions across the list (e.g. ancient, medieval, early modern, 19th century;
   Europe, Middle East, Asia, Africa, the Americas). At most 2 from Europe.
+- About a third of the titles use one of the winning angles above, never the same one twice in a row.
 - Must be well documented by historians/archaeology so the script can be accurate.
 - No living people, no graphic violence focus, no modern politics.
 - Do not repeat or closely resemble these past topics:
