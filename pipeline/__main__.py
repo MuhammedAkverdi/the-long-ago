@@ -20,7 +20,7 @@ import re
 import sys
 from zoneinfo import ZoneInfo
 
-from . import github, images, thumbnail, youtube
+from . import colab, github, images, thumbnail, youtube
 from .config import CFG, MOCK, WORK, duration, env, load_state, log, read_json, run, save_state, upload_mode, write_json
 from .episode import AI_NOTE, produce, ts, upload_all
 from .llm import LLMUnavailable
@@ -182,6 +182,7 @@ def cmd_produce(_args) -> None:
                 continue
             log(f"resuming delivery of {rec['slug']}")
             _finish(rec, WORK / rec["slug"])
+            colab.cleanup(rec["slug"])
             return
     paused = [tid for tid, t in state["topics"].items() if t.get("paused") and t.get("status") == "in_progress"]
     if not paused and os.environ.get("GITHUB_EVENT_NAME") == "schedule" \
@@ -228,6 +229,7 @@ def cmd_produce(_args) -> None:
     save_state(state)
     _finish(record, WORK / record["slug"])
     shutil.rmtree(WORK / record["slug"], ignore_errors=True)  # delivered: keep the cross-run cache small
+    colab.cleanup(record["slug"])
     if info["remaining"] == 0 and info["issue"]:
         github.close(info["issue"])
 

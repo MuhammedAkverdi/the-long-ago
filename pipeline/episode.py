@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 
-from . import images, render, thumbnail, tts, youtube
+from . import colab, images, render, thumbnail, tts, youtube
 from .config import CFG, WORK, duration, log, read_json, run, slugify, write_json
 from .script import build, pick_structure
 
@@ -81,11 +81,15 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
         script = build(topic, pick_structure(recent_structures), cache=folder / "steps")
         write_json(script_path, script)
 
+    colab.offer(folder, slug, script)  # an open Colab notebook draws while the narration is voiced
+
     log("narration")
     wavs = [tts.synthesize(c["narration"], folder / "audio" / f"ch{i:02d}.wav") for i, c in enumerate(script["chapters"])]
     narration = folder / "narration.wav"
     starts, durs = render.assemble_narration(wavs, narration)
     total = duration(narration)
+
+    colab.collect(folder, slug)
 
     log("thumbnail")  # made before the chapter images so it gets the day's image allowance first
     thumbnail.raw_image(script["thumbnail_prompt"], folder)

@@ -64,10 +64,14 @@ def overlay(base: Image.Image, text: str, out: pathlib.Path, darken: float = 1.0
     return out
 
 
+def raw_prompt(prompt: str) -> str:
+    return prompt + ". Single clear focal subject on the right half, empty darker space on the left."
+
+
 def raw_image(prompt: str, folder: pathlib.Path) -> pathlib.Path | None:
     """The thumbnail's base picture (cached in the folder, so calling it twice costs one image)."""
-    return images.generate(prompt + ". Single clear focal subject on the right half, empty darker space on the left.",
-                           folder / "thumb_raw.png", providers=CFG["images"].get("thumbnail_providers"))
+    return images.generate(raw_prompt(prompt), folder / "thumb_raw.png",
+                           providers=CFG["images"].get("thumbnail_providers"))
 
 
 def make(prompt: str, text: str, folder: pathlib.Path, fallback: pathlib.Path | None = None) -> pathlib.Path:

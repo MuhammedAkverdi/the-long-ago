@@ -43,10 +43,19 @@ def _mock(prompt: str, out: pathlib.Path, aspect: str) -> None:
     img.save(out)
 
 
+def framed(prompt: str, aspect: str) -> str:
+    framing = "wide cinematic landscape composition" if aspect == "16:9" else "tall vertical portrait composition"
+    return f"{prompt}. {framing}"[:2000]
+
+
+def full_prompt(prompt: str, aspect: str = "16:9") -> str:
+    """The exact text a generator receives for a scene (style + framing), also handed to Colab."""
+    return framed(f"{prompt}. Style: {CFG['video']['image_style']}. Anonymous ordinary people only.", aspect)
+
+
 def _cloudflare(prompt: str, aspect: str) -> bytes:
     w, h = (1344, 768) if aspect == "16:9" else (768, 1344)
-    framing = "wide cinematic landscape composition" if aspect == "16:9" else "tall vertical portrait composition"
-    text = f"{prompt}. {framing}"[:2000]
+    text = framed(prompt, aspect)
     headers = {"Authorization": f"Bearer {env('CLOUDFLARE_API_TOKEN')}"}
     last: Exception | None = None
     for model in CFG["images"]["cloudflare_models"]:
