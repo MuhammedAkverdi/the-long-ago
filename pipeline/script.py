@@ -162,6 +162,7 @@ def take_reveal(text: str) -> tuple[str, float | None]:
 def build(topic: str, structure: str, cache: pathlib.Path | None = None, style: str = "painterly") -> dict:
     if MOCK:
         return _mock_script(topic, structure)
+    style = _step(cache, "style", lambda: style)  # a resumed episode keeps its first picture style
     if cache and (cache / "structure.json").exists():  # a resumed episode keeps its first structure
         structure = json.loads((cache / "structure.json").read_text(encoding="utf-8"))
     elif cache:
@@ -217,7 +218,8 @@ period clothing every time)", "chapters": [{{"heading": "short chapter title (fo
 
     n_hooks = int(sc.get("hook_candidates", 0) or 0)
     hook, hook_options = "", []
-    if n_hooks >= 2:
+    started_old = bool(cache and (cache / "chapter00.json").exists() and not (cache / "hooks.json").exists())
+    if n_hooks >= 2 and not started_old:  # a chapter 1 already written without a winner keeps its own opening
         log(f"hook tournament: {n_hooks} candidates")
         try:
             hook, hook_options = _step(cache, "hooks", lambda: list(pick_hook(topic, notes, outline, n_hooks)))

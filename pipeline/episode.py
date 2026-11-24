@@ -62,15 +62,15 @@ def chapter_visuals(script: dict, chapter_imgs: list[list[pathlib.Path]], archiv
     out_imgs, out_w = [], []
     for i, (c, imgs) in enumerate(zip(script["chapters"], chapter_imgs)):
         items: list[tuple[pathlib.Path, float]] = [(p, 1.0) for p in imgs]
-        old = [f for f in archival if f["chapter"] == i]
-        for j, f in enumerate(old):  # spread archival pictures through the chapter (never first)
-            pos = min(len(items), 1 + (j + 1) * len(items) // (len(old) + 1))
-            items.insert(pos, (folder / "archival" / f["path"], 1.0))
-        if cards_on:
+        if cards_on:  # cards first: their positions count generated pictures only
             for k, card in enumerate(sorted(c.get("cards") or [], key=lambda x: -x["after_image"])):
                 path = brand.word_card(card["text"], folder / "cards" / f"ch{i:02d}_{k}.png")
                 pos = min(len(items), max(1, card["after_image"] + 1))  # never the chapter's first shot
                 items.insert(pos, (path, CARD_WEIGHT))
+        old = [f for f in archival if f["chapter"] == i]
+        for j, f in enumerate(old):  # spread archival pictures through the chapter (never first)
+            pos = min(len(items), 1 + (j + 1) * len(items) // (len(old) + 1))
+            items.insert(pos, (folder / "archival" / f["path"], 1.0))
         out_imgs.append([p for p, _ in items])
         out_w.append([w for _, w in items])
     return out_imgs, out_w

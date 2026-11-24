@@ -305,7 +305,7 @@ def burn_subtitles(video: pathlib.Path, srt: pathlib.Path, out: pathlib.Path) ->
             tmp_fonts.mkdir(exist_ok=True)
             (tmp_fonts / pathlib.Path(fp).name).write_bytes(pathlib.Path(fp).read_bytes())
             extra = ":fontsdir=_fonts"
-            style = (f"FontName={family},FontSize=16,PrimaryColour={_ass_colour(brand.color('accent', '#E9A53C'))},"
+            style = (f"FontName={family},FontSize=14,PrimaryColour={_ass_colour(brand.color('accent', '#E9A53C'))},"
                      f"OutlineColour={_ass_colour(brand.color('ink', '#1C1A17'))},BorderStyle=1,Outline=3,"
                      "Shadow=1,BackColour=&H80000000,Alignment=2,MarginV=110")
     # run inside the srt's folder so the filter path needs no escaping

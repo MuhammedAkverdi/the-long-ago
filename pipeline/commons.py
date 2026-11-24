@@ -20,7 +20,7 @@ from .config import CFG, MOCK, log
 API = "https://commons.wikimedia.org/w/api.php"
 # Wikimedia asks automated clients for a descriptive User-Agent with a way to reach the operator.
 HEADERS = {"User-Agent": "TheLongAgoBot/1.0 (https://github.com/muhammedakverdi/the-long-ago)"}
-_OK_LICENCE = re.compile(r"public domain|^pd\b|^pd-|cc0|^cc by \d", re.I)
+_OK_LICENCE = re.compile(r"public domain|^pd-old|^pd-art|cc0|^cc by \d", re.I)
 _BAD_LICENCE = re.compile(r"\bsa\b|share|\bnc\b|\bnd\b|fair use", re.I)
 
 
@@ -97,28 +97,39 @@ def fetch(requests_list: list[dict], folder: pathlib.Path) -> list[dict]:
         return found
     folder.mkdir(parents=True, exist_ok=True)
     used: set[str] = set()
+    completed = 0  # searches that ran without a network/API error
     for req in requests_list:
         if len(found) >= limit:
             break
         try:
-            for cand in search(str(req["query"]))[:4]:
-                if cand["title"] in used or not cand["url"]:
-                    continue
-                data = requests.get(cand["url"], headers=HEADERS, timeout=60).content
-                img = Image.open(io.BytesIO(data)).convert("RGB")
+            candidates = search(str(req["query"]))[:4]
+            completed += 1
+        except Exception as exc:  # noqa: BLE001 - archival pictures are a bonus, never fatal
+            log(f"archival search '{req.get('query')}' skipped: {str(exc)[:150]}")
+            continue
+        for cand in candidates:
+            if cand["title"] in used or not cand["url"]:
+                continue
+            try:
+                r = requests.get(cand["url"], headers=HEADERS, timeout=60)
+                r.raise_for_status()
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
                 buf = io.BytesIO()
                 img.save(buf, "JPEG", quality=90)
                 if not _relevant(buf.getvalue(), str(req["query"]), str(req.get("context", ""))):
                     continue
-                path = folder / f"{len(found):02d}.png"
-                fit_16x9(img).save(path)
-                used.add(cand["title"])
-                found.append({"chapter": int(req["chapter"]), "path": path.name, **{k: cand[k] for k in
-                              ("title", "author", "licence", "page")}})
-                log(f"archival picture: {cand['title']} ({cand['licence']})")
-                break
-        except Exception as exc:  # noqa: BLE001 - archival pictures are a bonus, never fatal
-            log(f"archival search '{req.get('query')}' skipped: {str(exc)[:150]}")
+            except Exception as exc:  # noqa: BLE001 - try the next candidate
+                log(f"archival candidate {cand['title'][:60]} skipped: {str(exc)[:120]}")
+                continue
+            path = folder / f"{len(found):02d}.png"
+            fit_16x9(img).save(path)
+            used.add(cand["title"])
+            found.append({"chapter": int(req["chapter"]), "path": path.name, **{k: cand[k] for k in
+                          ("title", "author", "licence", "page")}})
+            log(f"archival picture: {cand['title']} ({cand['licence']})")
+            break
+    if not completed:  # Commons unreachable this run: try again when the episode resumes
+        return found
     manifest.write_text(json.dumps(found, ensure_ascii=False, indent=1), encoding="utf-8")
     return found
 
