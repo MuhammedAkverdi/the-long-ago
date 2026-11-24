@@ -520,7 +520,7 @@ def cmd_check(_args) -> None:
         img = images.generate("a medieval peasant family eating soup by a hearth", probe / f"{prov}.png",
                               providers=[prov])
         if prov == "gemini" and img is None:
-            log("INFO gemini images unavailable (optional, paid) - Cloudflare will be used")
+            log("INFO paid Gemini/Imagen images unavailable (GEMINI_IMAGE_API_KEY missing or no credit) - Cloudflare will be used")
             continue
         report(f"image provider {prov}", img is not None)
     from . import colab_remote

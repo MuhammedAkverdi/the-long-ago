@@ -1,19 +1,24 @@
 """Scene images. Providers are tried in order (config images.providers):
 - cloudflare: FLUX.1 schnell on Workers AI (free daily allowance, ~170 images/day)
-- gemini:     Nano Banana family (paid; needs billing or Google AI Pro credits)
+- gemini:     Imagen 4 / Nano Banana via the Gemini API (paid; Google AI Pro's monthly $10 credit).
+              Uses GEMINI_IMAGE_API_KEY (a key from a separate, billed project) so text generation
+              stays on the free GEMINI_API_KEY, and stops at images.gemini_monthly_usd per month.
 """
 from __future__ import annotations
 
 import base64
+import datetime
 import io
+import json
 import pathlib
 import random
 import textwrap
+import time
 
 import requests
 from PIL import Image, ImageDraw
 
-from .config import CFG, MOCK, PermanentError, env, log, retry
+from .config import CFG, MOCK, ROOT, PermanentError, env, log, retry
 
 _disabled: set[str] = set()  # providers out of quota for this run
 _daily_quota_hit = False       # Cloudflare said its *daily* free allocation is used up (not a bad token)
@@ -99,26 +104,122 @@ def _cloudflare(prompt: str, aspect: str) -> bytes:
     raise QuotaError(f"no Cloudflare image model available ({last})")
 
 
-def _gemini(prompt: str, aspect: str) -> bytes:
+SPEND_PATH = ROOT / "state" / "image_spend.json"   # {"2026-11": 1.24, ...}: paid image spend per month (USD)
+_image_client = None
+
+
+def _month() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
+
+
+def _read_spend() -> dict:
+    try:
+        return json.loads(SPEND_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def month_spend() -> float:
+    return float(_read_spend().get(_month(), 0.0))
+
+
+def _add_spend(usd: float) -> None:
+    data = _read_spend()
+    month = _month()
+    data[month] = round(float(data.get(month, 0.0)) + usd, 4)
+    for old in sorted(data)[:-13]:          # keep about a year of history
+        data.pop(old, None)
+    SPEND_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SPEND_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(SPEND_PATH)
+
+
+def _price(model: str) -> float:
+    prices = CFG["images"].get("gemini_prices_usd") or {}
+    return float(prices.get(model, prices.get("default", 0.07)))
+
+
+def _gemini_client():
+    """Client for paid image calls, on the dedicated image key (a separate, billed project)."""
+    global _image_client
+    if _image_client is None:
+        key = env("GEMINI_IMAGE_API_KEY", required=False)
+        if not key:
+            raise QuotaError("GEMINI_IMAGE_API_KEY not set (paid images off)")
+        from google import genai
+        _image_client = genai.Client(api_key=key)
+    return _image_client
+
+
+def _gemini_one(model: str, prompt: str, aspect: str) -> bytes | None:
     from google.genai import types
-    from .llm import client
-    last = None
+    if model.startswith("imagen"):
+        resp = _gemini_client().models.generate_images(
+            model=model, prompt=prompt,
+            config=types.GenerateImagesConfig(number_of_images=1, aspect_ratio=aspect,
+                                              person_generation="allow_adult"))
+        for img in resp.generated_images or []:
+            if img.image and img.image.image_bytes:
+                return img.image.image_bytes
+        return None
+    resp = _gemini_client().models.generate_content(
+        model=model, contents=prompt,
+        config=types.GenerateContentConfig(response_modalities=["IMAGE"],
+                                           image_config=types.ImageConfig(aspect_ratio=aspect)))
+    for cand in resp.candidates or []:
+        for part in (cand.content.parts if cand.content else []) or []:
+            if part.inline_data and part.inline_data.data:
+                return part.inline_data.data
+    return None
+
+
+def _gemini(prompt: str, aspect: str) -> bytes:
+    budget = float(CFG["images"].get("gemini_monthly_usd", 0) or 0)
+    last: Exception | None = None
+    _gemini_client()   # no image key: QuotaError, provider skipped for the run
     for model in CFG["models"]["image"]:
+        if model in _disabled:
+            continue
+        cost = _price(model)
+        spent = month_spend()
+        if budget and spent + cost > budget:
+            log(f"{model}: monthly image budget reached (${spent:.2f} of ${budget:.2f})")
+            last = QuotaError(f"monthly image budget used (${spent:.2f}/${budget:.2f})")
+            continue
         try:
-            resp = client().models.generate_content(
-                model=model, contents=prompt,
-                config=types.GenerateContentConfig(response_modalities=["IMAGE"],
-                                                   image_config=types.ImageConfig(aspect_ratio=aspect)))
-            for cand in resp.candidates or []:
-                for part in (cand.content.parts if cand.content else []) or []:
-                    if part.inline_data and part.inline_data.data:
-                        return part.inline_data.data
-            last = RuntimeError("no image returned (possibly filtered)")
+            try:
+                data = _gemini_one(model, prompt, aspect)
+            except Exception as exc:  # noqa: BLE001
+                text = str(exc).lower()
+                if getattr(exc, "code", None) == 429 and "minute" in text and "limit: 0" not in text:
+                    log(f"{model}: per-minute limit, waiting 40s")   # short limit, not out of credit
+                    time.sleep(40)
+                    data = _gemini_one(model, prompt, aspect)
+                else:
+                    raise
         except Exception as exc:  # noqa: BLE001
-            last = exc
-            if getattr(exc, "code", None) in (401, 403, 429):  # no billing / out of quota
-                raise QuotaError(str(exc)) from exc
-    raise last  # type: ignore[misc]
+            code = getattr(exc, "code", None)
+            if code in (401, 403, 429) or (code == 400 and any(k in str(exc).lower() for k in ("billing", "billed", "api key"))):
+                # no billing / bad key / out of credit or quota: stop asking this model for the run
+                log(f"{model}: {str(exc)[:200]}")
+                _disabled.add(model)
+                last = QuotaError(str(exc))
+                continue
+            if code == 404:  # model renamed or retired: try the next one
+                _disabled.add(model)
+                last = PermanentError(f"{model} not found")
+                continue
+            raise  # transient (5xx, network): retry() tries again
+        if data:
+            _add_spend(cost)
+            return data
+        _add_spend(cost)   # a filtered prompt may still be billed; count it to stay under budget
+        last = PermanentError(f"{model}: no image returned (possibly filtered)")
+    if isinstance(last, PermanentError) and not isinstance(last, QuotaError) and \
+            any(m not in _disabled for m in CFG["models"]["image"]):
+        raise last   # this prompt failed, the provider itself still works
+    raise QuotaError(str(last or "no Gemini image model available"))
 
 
 PROVIDERS = {"cloudflare": _cloudflare, "gemini": _gemini}

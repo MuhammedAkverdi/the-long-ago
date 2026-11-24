@@ -51,6 +51,7 @@ jobs:
         run: python -m pipeline produce
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_IMAGE_API_KEY: ${{ secrets.GEMINI_IMAGE_API_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
@@ -84,7 +85,11 @@ jobs:
         env:
           BR: ${{ github.event.repository.default_branch }}
         run: |
-          cmp -s state/state.json "$RUNNER_TEMP/base.json" && exit 0
+          # paid image spend (state/image_spend.json) is written only by this one-at-a-time workflow: keep ours
+          SPEND=0; [ -f state/image_spend.json ] && ! git diff --quiet HEAD -- state/image_spend.json 2>/dev/null && SPEND=1
+          [ -f state/image_spend.json ] && ! git ls-files --error-unmatch state/image_spend.json >/dev/null 2>&1 && SPEND=1
+          [ "$SPEND" = 1 ] && cp state/image_spend.json "$RUNNER_TEMP/spend.json"
+          cmp -s state/state.json "$RUNNER_TEMP/base.json" && [ "$SPEND" = 0 ] && exit 0
           cp state/state.json "$RUNNER_TEMP/mine.json"
           git config user.name "the-long-ago-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -94,6 +99,7 @@ jobs:
             python -m pipeline merge-state "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/mine.json" state/state.json > "$RUNNER_TEMP/merged.json"
             cp "$RUNNER_TEMP/merged.json" state/state.json
             git add state/state.json
+            if [ "$SPEND" = 1 ]; then cp "$RUNNER_TEMP/spend.json" state/image_spend.json; git add state/image_spend.json; fi
             git diff --cached --quiet && exit 0
             git commit -q -m "state: ${{ github.workflow }} #${{ github.run_id }}"
             git push -q origin "HEAD:$BR" && exit 0

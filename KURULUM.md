@@ -21,7 +21,7 @@ Yayın saatleri: ana videolar **Çarşamba ve Cumartesi 17:00**, Shorts **Salı,
 Hangi servis ne yapıyor:
 - **Senaryo:** Gemini (ücretsiz katman). Model adı değişirse sistem yenisini kendisi bulur.
 - **Ses:** Kokoro (açık kaynak, ücretsiz). GitHub'ın bilgisayarında çalışır.
-- **Görseller:** Cloudflare FLUX.2 (günlük ücretsiz kota). Her görseli Gemini kontrol eder, bozuk olanı yeniden çizdirir.
+- **Görseller:** Önce Imagen 4 Fast (Google AI Pro'nun aylık 10$ API kredisinden, ayda ~500 görsel, sistem 9,5$'ta durur), kredi bitince Cloudflare FLUX.2 (günlük ücretsiz kota). Her görseli Gemini kontrol eder, bozuk olanı yeniden çizdirir.
 - **Kurgu:** ffmpeg. Yağlı boya tarzı resimler, yavaş kamera hareketi, yumuşak geçişler, film dokusu ve bölüm başlıkları.
 
 ---
@@ -72,8 +72,16 @@ Depo → **Settings → Secrets and variables → Actions → New repository sec
 | `YT_CLIENT_ID` | Adım 5.4 |
 | `YT_CLIENT_SECRET` | Adım 5.4 |
 | `YT_REFRESH_TOKEN` | Adım 5.5 |
+| `GEMINI_IMAGE_API_KEY` | İsteğe bağlı, Adım 6b |
 
 Anahtarları sohbete yapıştırmayın, sadece GitHub'a girin.
+
+### Adım 6b — AI Pro görsel kredisi (5 dk, isteğe bağlı)
+1. https://aistudio.google.com → Pro hesabıyla girin → sol menü **Claim free API credits**.
+2. **Yeni bir proje** oluşturun (ör. `the-long-ago-images`). Adım 3'teki projeyi seçmeyin, yoksa metin üretimi de ücretli olur.
+3. **Set up billing** → 5$ ön ödeme (Prepay) → **Redeem and Continue**. Ön ödemeli hesap bakiyenin üstünde para çekmez.
+4. Aynı projede API anahtarı oluşturun → GitHub'a `GEMINI_IMAGE_API_KEY` adıyla ekleyin.
+Aylık harcama `state/image_spend.json` dosyasında görünür; sınır `config.yaml` → `images.gemini_monthly_usd`.
 
 ## Adım 7 — Kontrol (5 dk)
 Depo → **Actions** → **"0 - Ayarları kontrol et"** → **Run workflow**. Yeşil tik = her şey hazır.

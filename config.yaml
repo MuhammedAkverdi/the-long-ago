@@ -30,17 +30,25 @@ models:
   researcher: ["gemini-3.8-flash", "auto", "gemini-3.5-flash-lite"]
   light: ["gemini-3.5-flash-lite", "auto"]     # küçük düzeltmeler (kotayı korumak için)
   qc: ["gemini-3.5-flash-lite"]                # görsel kalite kontrolü (yüksek kotalı model)
-  image: ["gemini-3.1-flash-image"]           # sadece images.providers içinde "gemini" varsa (ücretli)
+  # Ücretli görseller (Google AI Pro'nun aylık 10$ API kredisinden, GEMINI_IMAGE_API_KEY ile).
+  # Imagen 4 Fast ~0,02$/görsel = ayda ~500 görsel. Biri çalışmazsa sıradaki denenir.
+  image: ["imagen-4.0-fast-generate-001", "gemini-3.1-flash-image"]
   tts: ["gemini-3.8-flash-tts"]               # sadece voice.provider = gemini ise
 
 images:
-  # Sırayla denenir. cloudflare = FLUX (günlük ücretsiz kota), gemini = Nano Banana (ücretli/AI Pro kredisi).
-  providers: ["cloudflare", "gemini"]
+  # Sırayla denenir. gemini = Imagen 4 (AI Pro kredisi, aylık sınırla), cloudflare = FLUX (günlük ücretsiz kota).
+  # GEMINI_IMAGE_API_KEY yoksa ya da aylık sınır dolunca gemini atlanır, Cloudflare kullanılır.
+  providers: ["gemini", "cloudflare"]
   thumbnail_providers: ["gemini", "cloudflare"]   # kapak en önemli görsel: önce en kalitelisi denenir
   cloudflare_models:
     - "@cf/black-forest-labs/flux-2-klein-4b"    # yeni nesil, daha kaliteli (~95 görsel/gün ücretsiz)
     - "@cf/black-forest-labs/flux-1-schnell"     # yedek (~170 görsel/gün)
   cloudflare_steps: 4
+  gemini_monthly_usd: 9.5  # aylık kredi 10$; bu sınıra gelince ay sonuna kadar Cloudflare'e geçilir
+  gemini_prices_usd:       # harcama takibi için görsel başı fiyat (ai.google.dev/gemini-api/docs/pricing)
+    imagen-4.0-fast-generate-001: 0.02
+    gemini-3.1-flash-image: 0.067
+    default: 0.07
   quality_check: true      # her görseli Gemini'ye gösterip bozuk el/yüz/yazı/modern nesne varsa yeniden çizer
   max_redraw_ratio: 0.1
 
