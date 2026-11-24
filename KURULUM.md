@@ -10,10 +10,11 @@ Hepsi **ücretsiz** servislerle çalışır.
 |---|---|---|
 | Pazartesi 08:00 | 6 konu önerilir (GitHub'da "issue" olarak) | İsterseniz 2 tanesini işaretleyin. Yapmazsanız ertesi sabah sistem kendisi seçer. |
 | Salı ve Perşembe 11:30 | Bölüm + 2 Shorts hazırlanmaya başlar (ücretsiz kota biterse ertesi gün devam eder) | Yok |
-| Video hazır olunca | Telefonunuza "🎬 Onay bekliyor" bildirimi gelir | **Hiçbir şey.** 48 saat içinde `/iptal` yazmazsanız kendiliğinden onaylanır. |
+| Video hazır olunca | Telefonunuza "🎬 Onay bekliyor" bildirimi gelir | **Hiçbir şey.** 48 saat içinde `/iptal` yazmazsanız kendiliğinden onaylanır. (Doğruluk kontrolü çalışmamış bir bölüm ise otomatik onaylanmaz, `/onay` beklenir.) |
 | Her gün 09:30 | Onaylanan video YouTube'a yüklenir ve zamanlanır | Yok |
 | Ayın 3'ü | 2-3 saatlik uyku derlemesi hazırlanır | Yok |
-| Bir hata olursa | "⚠️" bildirimi gelir, sistem bir sonraki çalışmada tekrar dener | Yok (isterseniz bana iletin) |
+| Bir hata olursa | "⚠️" bildirimi gelir, sistem bir sonraki çalışmada tekrar dener (aynı hata tekrar ederse aynı konuya yorum düşer, yeni bildirim yağmuru olmaz) | Yok (isterseniz bana iletin) |
+| Her Pazar 10:15 | Haftalık sağlık kontrolü: YouTube bağlantısı, Gemini ve Cloudflare anahtarları denenir; videolar yüklenmeden birikiyorsa "📦" uyarısı gelir | Sadece uyarı gelirse |
 
 Yayın saatleri: ana videolar **Çarşamba ve Cumartesi 17:00**, Shorts **Salı, Cuma, Pazar 15:00**.
 

@@ -64,8 +64,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh label create hata --color b60205 --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh issue create --repo "$GITHUB_REPOSITORY" --label hata \
-            --title "⚠️ Otomatik çalışma hata verdi: ${{ github.workflow }}" \
-            --body "Çalışma kaydı: $URL — Sistem bir sonraki çalışmada kendiliğinden tekrar dener."
+          WF: ${{ github.workflow }}
+        run: bash scripts/report_failure.sh "$WF" "$URL"

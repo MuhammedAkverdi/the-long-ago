@@ -224,9 +224,11 @@ End with a line "SOURCES:" followed by 5-8 lines, each one real, well-known scho
 article on this subject in the form "Author, Title (Year)". Only list works you are certain exist.""",
                              role="researcher", temperature=0.3)
         notes, _, tail = text.partition("SOURCES:")
-        books = [ln.strip(" -*\t") for ln in tail.splitlines() if ln.strip(" -*\t")][:8]
-        log(f"research: {len(notes)} chars, {len(books)} reading-list entries (ungrounded)")
-        return notes.strip(), [{"title": b[:160], "url": ""} for b in books]
+        books = [re.sub(r"^\d+[.)]\s*", "", ln.strip(" -*\t")) for ln in tail.splitlines() if ln.strip(" -*\t")][:8]
+        from .sources import verify  # model-recalled titles can be invented: keep only catalogued ones
+        checked = verify([{"title": b[:160], "url": ""} for b in books])
+        log(f"research: {len(notes)} chars, {len(checked)}/{len(books)} reading-list entries verified (ungrounded)")
+        return notes.strip(), checked
     sources: list[dict] = []
     seen = set()
     try:

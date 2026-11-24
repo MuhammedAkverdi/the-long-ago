@@ -8,8 +8,10 @@ from . import colab, colab_remote, images, render, thumbnail, tts, youtube
 from .config import CFG, WORK, duration, log, read_json, run, slugify, write_json
 from .script import build, pick_structure
 
-AI_NOTE = ("Illustrations are AI-generated artistic reconstructions, not historical images. "
-           "Narration is AI-voiced; the script is researched from the sources below and reviewed before publishing.")
+AI_NOTE = ("Made with AI: illustrations are AI-generated artistic reconstructions, not historical images, "
+           "and the narration is AI-voiced. The script is AI-assisted, based on published historical "
+           "scholarship and checked by an automated fact-check pass; it may still contain mistakes, so please "
+           "check important details in published scholarship and tell us in the comments if you spot an error.")
 
 
 def ts(seconds: float) -> str:
