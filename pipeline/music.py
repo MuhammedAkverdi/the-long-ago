@@ -103,7 +103,7 @@ def make_bed(total: float, chapter_starts: list[float], out: pathlib.Path, seed:
             wf.writeframes((np.clip(stereo * 0.25, -1, 1) * 32767).astype("<i2").tobytes())
             pos += block
             i += 1
-    level = float(CFG["video"].get("music_lufs", -38))
+    level = float(CFG["video"].get("music_lufs", -33))
     run(["ffmpeg", "-y", "-i", str(raw), "-af",
          f"aecho=0.8:0.7:120|260:0.35|0.22,lowpass=f=2600,highpass=f=60,"
          f"afade=t=out:st={max(total - 6, 0):.2f}:d=6,loudnorm=I={level}:TP=-9:LRA=7",

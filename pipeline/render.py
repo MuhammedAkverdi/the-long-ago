@@ -186,7 +186,7 @@ def mux(video: pathlib.Path, narration: pathlib.Path, out: pathlib.Path, music: 
         vol = 1.0 if premixed else CFG["video"]["music_volume"]
         cmd += ([] if premixed else ["-stream_loop", "-1"]) + ["-i", str(track), "-filter_complex",
                 f"[1:a]asplit=2[v][key];[2:a]volume={vol},aresample=44100,aformat=channel_layouts=stereo[m];"
-                "[m][key]sidechaincompress=threshold=0.05:ratio=3:attack=200:release=1500[md];"
+                "[m][key]sidechaincompress=threshold=0.05:ratio=2:attack=200:release=1500[md];"
                 "[v]aformat=channel_layouts=stereo[vs];"
                 "[vs][md]amix=inputs=2:duration=first:normalize=0[a]",
                 "-map", "0:v", "-map", "[a]"]
@@ -194,7 +194,11 @@ def mux(video: pathlib.Path, narration: pathlib.Path, out: pathlib.Path, music: 
         cmd += ["-map", "0:v", "-map", "1:a"]
     cmd += ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
             "-shortest", "-movflags", "+faststart", str(out)]
-    run(cmd)
+    try:
+        run(cmd)
+    finally:
+        if premixed and track:
+            track.unlink(missing_ok=True)  # ~300 MB WAV: never leave it in the work cache
 
 
 def _fmt(t: float) -> str:

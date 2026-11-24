@@ -132,8 +132,10 @@ def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: 
                    fallback=all_imgs[0] if all_imgs else None)
     description = build_description(script, starts)
     (folder / "metadata.md").write_text(
-        f"# {script['title']}\n\n## Title options\n\n" + "".join(f"- {t}\n" for t in script.get("title_options", []))
-        + f"\n## Description\n\n{description}\n\n## Tags\n\n{', '.join(script['tags'])}\n",
+        f"# {script['title']}\n\n"
+        + ("## Title options\n\n" + "".join(f"- {t}\n" for t in script["title_options"]) + "\n"
+           if script.get("title_options") else "")
+        + f"## Description\n\n{description}\n\n## Tags\n\n{', '.join(script['tags'])}\n",
         encoding="utf-8")
 
     shorts = []

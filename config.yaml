@@ -81,7 +81,7 @@ video:
   maxrate: "6M"
   music_volume: 0.07                # assets/music içine telifsiz müzik koyarsanız kullanılır
   generated_music: true             # assets/music boşsa sistem kendi sakin fon müziğini üretir (telif yok)
-  music_lufs: -38                   # üretilen müziğin seviyesi: anlatımın ~22 dB altında
+  music_lufs: -33                   # üretilen müziğin seviyesi: konuşurken ~22 dB, aralarda ~17 dB altında
   image_style: >-
     painterly historical illustration, soft oil painting, muted warm earth palette,
     gentle candle or daylight, cinematic composition, detailed everyday objects,
