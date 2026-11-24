@@ -77,6 +77,9 @@ def offer(folder: pathlib.Path, slug: str, script: dict) -> bool:
         job = job_for(slug, script)
         job["images"] = [i for i in job["images"]  # hand-made pictures already in place are not redrawn
                          if not ((folder / i["path"]).exists() and (folder / i["path"]).stat().st_size > 1000)]
+        if not job["images"]:  # nothing left to draw: don't make a notebook load the model for nothing
+            write_json(marker, {"paths": []})
+            return False
         for name in _assets(JOBS_TAG):  # only one episode is produced at a time: drop stale jobs first
             if name.endswith(".json") and name != f"{slug}.json":
                 subprocess.run(["gh", "release", "delete-asset", JOBS_TAG, name, "--repo", github.repo(), "-y"],

@@ -91,7 +91,8 @@
       "pitch": "Explore the secluded island of Murano to see how Renaissance craft families guarded their glassmaking secrets and managed daily home life.",
       "title": "A Day in the Life of a Glassmaker in 15th-Century Venice",
       "pauses": 0,
-      "work_slug": "20261124-59f8716e-a1"
+      "work_slug": "20261124-59f8716e-a1",
+      "paused": true
     }
   }
 }

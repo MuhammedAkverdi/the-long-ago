@@ -22,8 +22,9 @@ def folder_for(slug: str) -> pathlib.Path | None:
     """The manual folder whose name (topic id) appears in the episode slug `<date>-<topic id>-a<n>`."""
     if not DIR.is_dir():
         return None
+    parts = slug.split("-")
     for d in sorted(DIR.iterdir()):
-        if d.is_dir() and len(d.name) >= 6 and f"-{d.name}" in slug:
+        if d.is_dir() and len(parts) > 1 and parts[1] == d.name:
             return d
     return None
 
