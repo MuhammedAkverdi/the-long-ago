@@ -29,7 +29,8 @@
       "pitch": "Explore the secluded island of Murano to see how Renaissance craft families guarded their glassmaking secrets and managed daily home life.",
       "work_slug": "20261124-59f8716e-a1",
       "status": "in_progress",
-      "pauses": 0
+      "pauses": 0,
+      "paused": true
     },
     "dca1b867": {
       "title": "A Day in the Life of a Shopkeeper in 17th-Century Edo",
