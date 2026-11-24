@@ -509,6 +509,16 @@ def cmd_check(_args) -> None:
             log("INFO gemini images unavailable (optional, paid) - Cloudflare will be used")
             continue
         report(f"image provider {prov}", img is not None)
+    from . import colab_remote
+    if colab_remote.available():
+        try:
+            specs = colab_remote._Client().call("list_runtime_specs", {}, timeout=120).get("runtimeSpecs", [])
+            ok_specs = [s["key"]["accelerator"] for s in specs if s.get("eligible") and s.get("key")]
+            report("Colab API", any(a in ("A100", "L4") for a in ok_specs), f"(uygun: {ok_specs})")
+        except Exception as exc:  # noqa: BLE001
+            report("Colab API", False, str(exc)[:300])
+    else:
+        log("INFO Colab API secrets not set (optional) - images come from Cloudflare or a manually run notebook")
     try:
         wav = tts.synthesize("The village woke before the sun, and the mill wheel began to turn.", probe / "voice.wav")
         report(f"voice {CFG['voice']['provider']}", duration(wav) > 1)
@@ -549,6 +559,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("topics")
     sub.add_parser("produce")
+    sub.add_parser("colab-cleanup")
     r = sub.add_parser("review")
     r.add_argument("--issue", type=int, required=True)
     r.add_argument("--command", required=True)
@@ -561,7 +572,8 @@ def main() -> None:
     ms.add_argument("mine")
     ms.add_argument("theirs")
     args = p.parse_args()
-    {"topics": cmd_topics, "produce": cmd_produce, "review": cmd_review, "compile": cmd_compile,
+    {"colab-cleanup": lambda _a: __import__("pipeline.colab_remote", fromlist=["x"]).cleanup_all(),
+     "topics": cmd_topics, "produce": cmd_produce, "review": cmd_review, "compile": cmd_compile,
      "selftest": cmd_selftest, "check": cmd_check, "auto-approve": cmd_auto_approve, "merge-state": cmd_merge_state}[args.cmd](args)
 
 

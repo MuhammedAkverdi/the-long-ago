@@ -89,6 +89,8 @@ colab:                              # isteğe bağlı: Colab not defteri açıks
   claim_wait_minutes: 3             # senaryo bitince not defterinin işi alması için beklenen süre
   result_wait_minutes: 90           # not defteri işi aldıysa resimler için en fazla bekleme
   heartbeat_minutes: 12             # not defterinden bu kadar süre ses gelmezse Cloudflare'e geçilir
+  remote_claim_minutes: 25          # Colab API ile sistem kendi açınca: makine + kurulum + model yükleme süresi
+  remote_max_minutes: 180           # Colab makinesi en fazla bu kadar açık kalır, sonra silinir
 
 production:
   produce_weekdays: [1, 3]         # Salı, Perşembe (0 = Pazartesi). Diğer günler yalnızca kotası biten bölüme devam edilir.

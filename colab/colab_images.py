@@ -32,6 +32,11 @@ RESULT_TAG_PREFIX = "colab-"    # sonuç release'i: colab-<slug>
 MAX_JOB_AGE_DAYS = 4            # bundan eski işler atlanır
 WAIT_MINUTES = 15               # iş yoksa en fazla bu kadar beklenir (GPU boşa birim yemesin)
 AUTO_DISCONNECT = True          # iş bitince/iş yoksa çalışma zamanını kapat (birim harcamayı durdurur)
+import os as _os
+HEADLESS = _os.environ.get("COLAB_HEADLESS") == "1"   # started by the pipeline through the Colab API
+if HEADLESS:
+    AUTO_DISCONNECT = False     # the pipeline deletes the runtime itself
+    PREVIEW_EVERY = 0
 POLL_SECONDS = 30               # kaç saniyede bir bakılır
 
 # VRAM yetmezse daha küçük boyut ver, ör. {"16:9": (1344, 768), "9:16": (768, 1344)}
@@ -42,7 +47,7 @@ SIZES = {
 NUM_STEPS = 9
 GUIDANCE = 0.0
 JPEG_QUALITY = 92
-PREVIEW_EVERY = 10              # her N resimde bir küçük önizleme göster (0 = kapalı)
+PREVIEW_EVERY = 0 if HEADLESS else 10  # her N resimde bir küçük önizleme göster (0 = kapalı)
 
 WORK_DIR = "/content/the_long_ago_work"
 
@@ -62,7 +67,9 @@ UPLOADS = "https://uploads.github.com"
 
 
 def get_token():
-    """Read GH_TOKEN from Colab Secrets, falling back to a getpass prompt."""
+    """Read GH_TOKEN from the environment (headless), Colab Secrets, or a getpass prompt."""
+    if _os.environ.get("GH_TOKEN"):
+        return _os.environ["GH_TOKEN"].strip()
     try:
         from google.colab import userdata
         token = userdata.get("GH_TOKEN")

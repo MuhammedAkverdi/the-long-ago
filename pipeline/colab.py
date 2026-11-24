@@ -64,14 +64,16 @@ def _assets(tag: str) -> list[str]:
     return list(_asset_info(tag))
 
 
-def offer(folder: pathlib.Path, slug: str, script: dict) -> None:
-    """Publish the job (once) so a running notebook can start while the narration is being voiced."""
+def offer(folder: pathlib.Path, slug: str, script: dict) -> bool:
+    """Publish the job (once) so a running notebook can start while the narration is being voiced.
+
+    Returns True when a job for this episode is published."""
     if MOCK or not _cfg().get("enabled"):
-        return
+        return False
     try:
         marker = folder / "colab_job.json"
         if marker.exists():
-            return
+            return True
         job = job_for(slug, script)
         for name in _assets(JOBS_TAG):  # only one episode is produced at a time: drop stale jobs first
             if name.endswith(".json") and name != f"{slug}.json":
@@ -83,20 +85,33 @@ def offer(folder: pathlib.Path, slug: str, script: dict) -> None:
             github.release(JOBS_TAG, "Colab jobs", "Image jobs for the optional Colab notebook", [path])
         write_json(marker, {"paths": [i["path"] for i in job["images"]]})
         log(f"colab: job published ({len(job['images'])} images)")
+        return True
     except Exception as exc:  # noqa: BLE001
         log(f"colab: could not publish job ({str(exc)[:200]})")
+        return False
 
 
-def collect(folder: pathlib.Path, slug: str) -> int:
-    """If a notebook claimed the job, wait for its images and unpack them as cached episode images."""
+def collect(folder: pathlib.Path, slug: str, remote=None) -> int:
+    """If a notebook claimed the job, wait for its images and unpack them as cached episode images.
+
+    `remote` is a colab_remote.Remote the pipeline started itself; it is always stopped here."""
+    try:
+        return _collect(folder, slug, remote)
+    finally:
+        if remote is not None:
+            remote.stop()
+
+
+def _collect(folder: pathlib.Path, slug: str, remote) -> int:
     if MOCK or not _cfg().get("enabled") or not (folder / "colab_job.json").exists():
         return 0
     try:
-        paths = (json.loads((folder / "colab_job.json").read_text(encoding="utf-8")).get("paths") or [])
-        if paths and all((folder / p).exists() and (folder / p).stat().st_size > 1000 for p in paths):
+        if not pending_paths(folder):
             return 0  # every image is already here (e.g. a resumed run)
         tag = f"colab-{slug}"
-        claim_deadline = time.time() + 60 * float(_cfg().get("claim_wait_minutes", 3))
+        claim_minutes = _cfg().get("remote_claim_minutes", 25) if remote is not None else _cfg().get(
+            "claim_wait_minutes", 3)  # our own runtime still has to boot, install and load the model
+        claim_deadline = time.time() + 60 * float(claim_minutes)
         names = _assets(tag)
         while "images.zip" not in names and "claimed.txt" not in names and time.time() < claim_deadline:
             time.sleep(30)
@@ -126,6 +141,15 @@ def collect(folder: pathlib.Path, slug: str) -> int:
     except Exception as exc:  # noqa: BLE001
         log(f"colab: could not use notebook images ({str(exc)[:200]}); using Cloudflare")
         return 0
+
+
+def pending_paths(folder: pathlib.Path) -> list[str]:
+    """Job images that are not in the episode folder yet."""
+    try:
+        paths = json.loads((folder / "colab_job.json").read_text(encoding="utf-8")).get("paths") or []
+    except (OSError, ValueError):
+        return []
+    return [p for p in paths if not ((folder / p).exists() and (folder / p).stat().st_size > 1000)]
 
 
 def _unpack(zip_path: pathlib.Path, folder: pathlib.Path) -> int:

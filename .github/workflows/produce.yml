@@ -49,7 +49,19 @@ jobs:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+          COLAB_PROJECT: ${{ secrets.COLAB_PROJECT }}
           UPLOAD_MODE: ${{ vars.UPLOAD_MODE }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Make sure no Colab GPU is left running
+        if: always()
+        continue-on-error: true
+        run: python -m pipeline colab-cleanup
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+          COLAB_PROJECT: ${{ secrets.COLAB_PROJECT }}
           GH_TOKEN: ${{ github.token }}
       - name: Keep unfinished episode work for the next run
         if: always()

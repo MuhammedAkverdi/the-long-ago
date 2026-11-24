@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 
-from . import colab, images, render, thumbnail, tts, youtube
+from . import colab, colab_remote, images, render, thumbnail, tts, youtube
 from .config import CFG, WORK, duration, log, read_json, run, slugify, write_json
 from .script import build, pick_structure
 
@@ -81,7 +81,17 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
         script = build(topic, pick_structure(recent_structures), cache=folder / "steps")
         write_json(script_path, script)
 
-    colab.offer(folder, slug, script)  # an open Colab notebook draws while the narration is voiced
+    remote = None
+    if colab.offer(folder, slug, script) and colab.pending_paths(folder):  # Colab draws while narration is voiced
+        remote = colab_remote.start()  # headless Colab via the Colab API, when its secrets are set
+    try:
+        return _produce_rest(topic, script, folder, slug, w, h, remote)
+    finally:
+        if remote is not None:
+            remote.stop()  # never leave a paid GPU running, whatever happened above
+
+
+def _produce_rest(topic: str, script: dict, folder: pathlib.Path, slug: str, w: int, h: int, remote) -> dict:
 
     log("narration")
     wavs = [tts.synthesize(c["narration"], folder / "audio" / f"ch{i:02d}.wav") for i, c in enumerate(script["chapters"])]
@@ -89,7 +99,7 @@ def produce(topic: str, recent_structures: list[str], slug: str | None = None) -
     starts, durs = render.assemble_narration(wavs, narration)
     total = duration(narration)
 
-    colab.collect(folder, slug)
+    colab.collect(folder, slug, remote)
 
     log("thumbnail")  # made before the chapter images so it gets the day's image allowance first
     thumbnail.raw_image(script["thumbnail_prompt"], folder)
