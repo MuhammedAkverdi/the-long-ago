@@ -13,12 +13,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import shutil
 import datetime as dt
 import re
 import sys
 from zoneinfo import ZoneInfo
 
-from . import github, thumbnail, youtube
+from . import github, images, thumbnail, youtube
 from .config import CFG, MOCK, WORK, duration, env, load_state, log, read_json, run, save_state, upload_mode, write_json
 from .episode import AI_NOTE, produce, ts, upload_all
 from .topics import propose
@@ -152,8 +154,21 @@ def _finish(record: dict, folder) -> dict:
     return record
 
 
+def _prune_work(state: dict) -> None:
+    """Drop work folders nothing will resume, so the cross-run cache doesn't grow."""
+    if not WORK.exists():
+        return
+    keep = {t.get("work_slug") for t in state["topics"].values() if t.get("status") == "in_progress"}
+    keep |= {slug for slug, r in state["episodes"].items() if not r.get("review_issue")}
+    for d in WORK.iterdir():
+        if d.is_dir() and d.name not in keep:
+            log(f"removing old work folder {d.name}")
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def cmd_produce(_args) -> None:
     state = load_state()
+    _prune_work(state)
     # 1) an episode that was made but not fully delivered last time
     for rec in state["episodes"].values():
         if rec.get("type") == "episode" and rec.get("status") in ("produced", "uploaded") and not rec.get("review_issue"):
@@ -167,16 +182,43 @@ def cmd_produce(_args) -> None:
             log(f"resuming delivery of {rec['slug']}")
             _finish(rec, WORK / rec["slug"])
             return
-    picked = choose_topic(state)
-    save_state(state)  # choose_topic may have marked failures
+    paused = [tid for tid, t in state["topics"].items() if t.get("paused") and t.get("status") == "in_progress"]
+    if not paused and os.environ.get("GITHUB_EVENT_NAME") == "schedule" \
+            and dt.datetime.now(dt.timezone.utc).weekday() not in CFG.get("production", {}).get("produce_weekdays", [1, 3]):
+        log("no paused episode and not a production day")
+        return
+    picked = None
+    if paused:
+        picked = (paused[0], {"issue": None, "remaining": 1})
+    else:
+        picked = choose_topic(state)
+        save_state(state)  # choose_topic may have marked failures
     if not picked:
         log("nothing to produce (no chosen topics yet)")
         return
     tid, info = picked
-    state["topics"][tid]["attempts"] = state["topics"][tid].get("attempts", 0) + 1
-    state["topics"][tid]["status"] = "in_progress"
+    t = state["topics"][tid]
+    if not t.pop("paused", False):  # continuing a paused episode is not a new attempt
+        t["attempts"] = t.get("attempts", 0) + 1
+        t["pauses"] = 0
+        t["work_slug"] = f"{dt.date.today():%Y%m%d}-{tid}-a{t['attempts']}"  # a new try starts from clean files
+    t["status"] = "in_progress"
     save_state(state)
-    record = produce(state["topics"][tid]["title"], state["recent_structures"])
+    t.setdefault("work_slug", f"{dt.date.today():%Y%m%d}-{tid}")
+    save_state(state)
+    try:
+        record = produce(t["title"], state["recent_structures"], slug=t["work_slug"])
+    except images.QuotaPause as exc:
+        state = load_state()
+        t = state["topics"][tid]
+        t["pauses"] = t.get("pauses", 0) + 1
+        if t["pauses"] > 4:  # should finish in ~2 days; something else is wrong, so count it as a failed try
+            save_state(state)
+            raise RuntimeError(f"episode still unfinished after {t['pauses']} paused runs: {exc}") from exc
+        log(f"paused: {exc}. Finished parts are kept; the next daily run continues this episode.")
+        t["paused"] = True
+        save_state(state)
+        return
     record["topic_id"] = tid
     state = load_state()
     state["episodes"][record["slug"]] = record
@@ -184,7 +226,8 @@ def cmd_produce(_args) -> None:
     state["recent_structures"] = (state["recent_structures"] + [record.get("structure", "")])[-10:]
     save_state(state)
     _finish(record, WORK / record["slug"])
-    if info["remaining"] == 0:
+    shutil.rmtree(WORK / record["slug"], ignore_errors=True)  # delivered: keep the cross-run cache small
+    if info["remaining"] == 0 and info["issue"]:
         github.close(info["issue"])
 
 

@@ -1,7 +1,7 @@
 name: 2 - Bölüm üret
 on:
   schedule:
-    - cron: "0 4 * * 2,4"
+    - cron: "0 4 * * *"   # new episodes Tue/Thu; other days only continue one paused by the image allowance
   workflow_dispatch:
 permissions:
   contents: write
@@ -25,6 +25,14 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: hf-kokoro-v1
+      - name: Restore unfinished episode work
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            work
+            !work/**/*.mp4
+          key: work-${{ github.run_id }}
+          restore-keys: work-
       - name: Install
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core
@@ -43,6 +51,14 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           UPLOAD_MODE: ${{ vars.UPLOAD_MODE }}
           GH_TOKEN: ${{ github.token }}
+      - name: Keep unfinished episode work for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            work
+            !work/**/*.mp4
+          key: work-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save state (3-way merge, safe with parallel runs)
         if: always()
         env:

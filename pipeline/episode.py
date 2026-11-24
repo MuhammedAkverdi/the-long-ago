@@ -67,9 +67,9 @@ def make_short(short: dict, idx: int, folder: pathlib.Path, fallback: list[pathl
     return {"file": final.name, "title": title[:100]}
 
 
-def produce(topic: str, recent_structures: list[str]) -> dict:
+def produce(topic: str, recent_structures: list[str], slug: str | None = None) -> dict:
     """Returns an episode record. All files live in WORK/<slug>/."""
-    slug = f"{dt.date.today():%Y%m%d}-{slugify(topic, 40)}"
+    slug = slug or f"{dt.date.today():%Y%m%d}-{slugify(topic, 40)}"  # a fixed slug lets a paused episode resume
     folder = WORK / slug
     folder.mkdir(parents=True, exist_ok=True)
     w, h = CFG["video"]["width"], CFG["video"]["height"]

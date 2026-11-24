@@ -16,10 +16,20 @@ from PIL import Image, ImageDraw
 from .config import CFG, MOCK, PermanentError, env, log, retry
 
 _disabled: set[str] = set()  # providers out of quota for this run
+_daily_quota_hit = False       # Cloudflare said its *daily* free allocation is used up (not a bad token)
 
 
 class QuotaError(PermanentError):
     pass
+
+
+class QuotaPause(Exception):
+    """Every image provider is out of today's allowance: keep the work and continue on a later run."""
+
+
+def exhausted() -> bool:
+    """True only when the day's free allowance ran out (a wrong token or outage is a real error, not a pause)."""
+    return _daily_quota_hit and all(p in _disabled for p in CFG["images"]["providers"])
 
 
 def _mock(prompt: str, out: pathlib.Path, aspect: str) -> None:
@@ -53,7 +63,12 @@ def _cloudflare(prompt: str, aspect: str) -> bytes:
             r = requests.post(url, headers=headers, timeout=120, json=body)
             if r.status_code == 400 and "properties" in r.text:  # schema changed: send the prompt alone
                 r = requests.post(url, headers=headers, timeout=120, json={"prompt": text})
-        if r.status_code == 429 or (r.status_code >= 400 and "neuron" in r.text.lower()):
+        daily = r.status_code >= 400 and ("neuron" in r.text.lower() or '"code":4006' in r.text.replace(" ", ""))
+        if r.status_code == 429 and not daily:  # short rate limit: retry() waits and tries again
+            raise RuntimeError(f"{model} rate limited: {r.text[:200]}")
+        if daily:
+            global _daily_quota_hit
+            _daily_quota_hit = True
             log(f"{model}: daily allowance used up (HTTP {r.status_code}: {r.text[:300]}), switching model")
             _disabled.add(model)
             last = QuotaError(f"{model} quota")
@@ -158,12 +173,22 @@ def generate_many(prompts: list[str], folder: pathlib.Path, aspect: str = "16:9"
     results: list[pathlib.Path | None] = []
     redraws_left = int(len(prompts) * CFG["images"].get("max_redraw_ratio", 0.2)) + 1
     for i, p in enumerate(prompts):
-        path = generate(p, folder / f"{i:03d}.png", aspect)
-        if path and redraws_left > 0 and not quality_ok(path, p):
+        cached, qc = folder / f"{i:03d}.png", folder / f"{i:03d}.qc"
+        if exhausted() and not (cached.exists() and cached.stat().st_size > 1000):
+            if fallback:
+                results.append(None)
+                continue
+            raise QuotaPause(f"image allowance used up at {folder.name}/{i:03d}")
+        path = generate(p, cached, aspect)
+        if path is None and exhausted() and not fallback:  # this image hit the limit: retry it on the next run
+            raise QuotaPause(f"image allowance used up at {folder.name}/{i:03d}")
+        if path and redraws_left > 0 and not qc.exists() and not quality_ok(path, p):
             redraws_left -= 1
             path.rename(path.with_suffix(".rejected.png"))
             path = generate(p + ". Simple clear composition, hands hidden or relaxed, no writing anywhere",
                             folder / f"{i:03d}.png", aspect) or path.with_suffix(".rejected.png")
+        if path:
+            qc.touch()  # checked once: a resumed run must not spend a redraw on it again
         results.append(path)
         if (i + 1) % 10 == 0:
             log(f"images: {i + 1}/{len(prompts)}")
