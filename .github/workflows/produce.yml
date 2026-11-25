@@ -57,7 +57,8 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         with:
           path: ~/.cache/the-long-ago
-          key: tla-geo-v1
+          key: tla-geo-v2-${{ github.run_id }}
+          restore-keys: tla-geo-v2-
       - name: Run
         if: steps.gate.outputs.run == 'true'
         run: python -m pipeline produce

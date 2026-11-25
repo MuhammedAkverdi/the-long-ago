@@ -61,24 +61,35 @@ def _fetch(url: str, dest: pathlib.Path) -> pathlib.Path:
 
 
 _RINGS: list | None = None
+_RINGS_ERROR: Exception | None = None
+
+
+def _load_rings() -> list:
+    rings = []
+    for name, url in GEO_URLS.items():
+        data = json.loads(_fetch(url, CACHE / "geo" / f"{name}.geojson").read_text(encoding="utf-8"))
+        for ft in data["features"]:
+            g = ft["geometry"]
+            polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
+            for poly in polys:
+                for ring in poly:
+                    xs = [p[0] for p in ring]
+                    ys = [p[1] for p in ring]
+                    rings.append((min(xs), max(xs), min(ys), max(ys), ring))
+    return rings
 
 
 def _rings() -> list:
     """All land rings with their bounding boxes (Natural Earth 10m, public domain)."""
-    global _RINGS
+    global _RINGS, _RINGS_ERROR
+    if _RINGS_ERROR is not None:
+        raise _RINGS_ERROR  # failed once this run: don't wait on the download again for every map
     if _RINGS is None:
-        rings = []
-        for name, url in GEO_URLS.items():
-            data = json.loads(_fetch(url, CACHE / "geo" / f"{name}.geojson").read_text(encoding="utf-8"))
-            for ft in data["features"]:
-                g = ft["geometry"]
-                polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
-                for poly in polys:
-                    for ring in poly:
-                        xs = [p[0] for p in ring]
-                        ys = [p[1] for p in ring]
-                        rings.append((min(xs), max(xs), min(ys), max(ys), ring))
-        _RINGS = rings
+        try:
+            _RINGS = _load_rings()
+        except Exception as exc:  # noqa: BLE001
+            _RINGS_ERROR = exc
+            raise
     return _RINGS
 
 
@@ -106,7 +117,8 @@ def land_path(p: Proj, span_lon: float, min_step: float = 1.2) -> str:
         pts, last = [], None
         for x, y in ring:
             q = p(x, y)
-            if last is None or abs(q[0] - last[0]) + abs(q[1] - last[1]) > min_step:
+            off = not (-W <= q[0] <= 2 * W and -H <= q[1] <= 2 * H)  # far off screen: only the rough outline
+            if last is None or abs(q[0] - last[0]) + abs(q[1] - last[1]) > (40 if off else min_step):
                 pts.append(q)
                 last = q
         if len(pts) >= 3:
@@ -266,7 +278,7 @@ def sc_map(sc: Scene, p: dict, i: int) -> None:
     wide = span * 3.0
     proj = Proj(p["lat"], p["lon"], wide)
     try:
-        d = land_path(proj, wide, 1.2 / 3.0)
+        d = land_path(proj, wide, 0.6 if span <= SPANS["region"] else 1.6)  # wide maps: fewer points
     except Exception as exc:  # noqa: BLE001 - no map data: show the place name instead
         log(f"map data unavailable ({str(exc)[:80]}), using a word card")
         return sc_kinetic(sc, {"lines": [p["place"]], "accent": 0}, i)
@@ -328,7 +340,7 @@ def sc_list(sc: Scene, p: dict, i: int) -> None:
 def sc_quote(sc: Scene, p: dict, i: int) -> None:
     sc.svg.append(f'<g id="{sc.sid}-pg"><rect x="300" y="130" width="1320" height="820" rx="16" fill="#fffaf0" stroke="{INK}" stroke-width="9"/>'
                   + "".join(f'<path d="M340,{290 + k * 110} L1580,{290 + k * 110}" stroke="#9fb6cf" stroke-width="3"/>' for k in range(6))
-                  + f'<path d="M420,130 L420,950" stroke="#d98c8c" stroke-width="4"/></g>')
+                  + '<path d="M420,130 L420,950" stroke="#d98c8c" stroke-width="4"/></g>')
     sc.anim(f"#{sc.sid}-pg", sc.at(0), "pop")
     step = max(0.5, (sc.dur - 1.2) / len(p["lines"]))
     for k, line in enumerate(p["lines"]):
@@ -542,6 +554,11 @@ def render_episode(board: list[list[dict]], beat_times: list[list[tuple[float, f
     fps = int(CFG["video"].get("fps", 25))
     mdir = folder / "motion"
     parts, cues, offset = [], [], 0.0
+    if any(b["scene"]["t"] == "map" for beats in board for b in beats):
+        try:
+            _rings()  # download map data once, up front (also fills the workflow cache)
+        except Exception as exc:  # noqa: BLE001 - maps then fall back to word cards
+            log(f"map data unavailable: {str(exc)[:120]}")
     for ci, beats in enumerate(board):
         project = mdir / f"ch{ci:02d}"
         prepare_assets(project)

@@ -233,7 +233,11 @@ def cmd_produce(_args) -> None:
             _finish(rec, WORK / rec["slug"])
             colab.cleanup(rec["slug"])
             return
-    paused = [tid for tid, t in state["topics"].items() if t.get("paused") and t.get("status") == "in_progress"]
+    pending_remakes = {tid for tid in CFG.get("production", {}).get("remake") or []
+                       if not state["topics"].get(tid, {}).get("remake_state")}
+    # a paused old-format run of a topic that is about to be remade must not be resumed: the remake starts clean
+    paused = [tid for tid, t in state["topics"].items()
+              if t.get("paused") and t.get("status") == "in_progress" and tid not in pending_remakes]
     if not paused and os.environ.get("GITHUB_EVENT_NAME") == "schedule" \
             and dt.datetime.now(dt.timezone.utc).weekday() not in CFG.get("production", {}).get("produce_weekdays", [1, 3]):
         log("no paused episode and not a production day")

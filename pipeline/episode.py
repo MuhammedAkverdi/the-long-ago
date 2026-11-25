@@ -314,7 +314,10 @@ def _produce_motion(topic: str, script: dict, folder: pathlib.Path, slug: str) -
     narration = folder / "narration.wav"
     starts, durs = render.assemble_narration(wavs, narration)
     total = duration(narration)
-    spans = [(starts[i + 1] if i + 1 < len(starts) else total) - starts[i] for i in range(len(starts))]
+    # chapter lengths snapped to whole video frames, so the joined clips never drift from the voice
+    fps = int(CFG["video"].get("fps", 25))
+    edges = [round(t * fps) for t in starts] + [round(total * fps)]
+    spans = [(edges[i + 1] - edges[i]) / fps for i in range(len(starts))]
 
     log("thumbnail")  # before the scene pictures so it gets the day's image allowance first
     thumbnail.raw_image(script["thumbnail_prompt"], folder)
@@ -325,7 +328,13 @@ def _produce_motion(topic: str, script: dict, folder: pathlib.Path, slug: str) -
         archival = commons.fetch(script["archival_requests"], folder / "archival")
     for f in archival:
         f["_path"] = folder / "archival" / f["path"]
-    old = _assign_archival(board, archival)
+    assign_path = folder / "archival_beats.json"  # fixed once, so cached picture numbers never shift on resume
+    if assign_path.exists():
+        by_path = {str(f["_path"]): f["_path"] for f in archival}
+        old = {(ci, bi): by_path[p] for ci, bi, p in read_json(assign_path) if p in by_path}
+    else:
+        old = _assign_archival(board, archival)
+        write_json(assign_path, [[ci, bi, str(p)] for (ci, bi), p in old.items()])
 
     log("pictures")
     pictures: list[dict[int, pathlib.Path]] = []

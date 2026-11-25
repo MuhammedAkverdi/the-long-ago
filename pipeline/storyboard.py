@@ -11,7 +11,7 @@ import json
 import re
 
 from .config import CFG, MOCK, log
-from .llm import generate_json
+from .llm import LLMUnavailable, generate_json
 
 SCENES = {
     "picture": "an illustration of what is being said (uses the next prepared picture). Optional "
@@ -109,8 +109,8 @@ def clean_scene(raw: dict, beat: str) -> dict | None:
             out.update(from_place=_s(raw.get("from_place"), 28), from_lat=flat, from_lon=flon)
         return out
     if t == "counter":
-        digits = re.sub(r"[^\d.]", "", str(raw.get("number", "")))
-        if not digits or digits.count(".") > 1:
+        digits = re.sub(r"[^\d.]", "", str(raw.get("number", ""))).rstrip(".")
+        if not re.fullmatch(r"\d+(\.\d+)?", digits):
             return None
         # a number must really be in the beat, so the screen never shows an invented figure
         plain = beat.replace(",", "")
@@ -224,8 +224,16 @@ Rules:
 
 Return JSON {{"scenes": [{{"beat": int, "t": "type", ...parameters}}]}}""",
                             role="light", temperature=0.5, validate=check)
-        raw = {int(s.get("beat", -1)): s for s in out.get("scenes", []) if isinstance(s, dict)
-               and str(s.get("beat", "")).lstrip("-").isdigit()}
+        items = [s for s in out.get("scenes", []) if isinstance(s, dict)]
+        nums = [int(s["beat"]) for s in items if str(s.get("beat", "")).isdigit()]
+        if len(nums) == len(items) and len(set(nums)) == len(nums):
+            if 0 not in nums and max(nums, default=0) == len(beats):
+                nums = [n - 1 for n in nums]  # the planner counted beats from 1
+            raw = dict(zip(nums, items))
+        else:  # unusable numbering: trust the order
+            raw = dict(enumerate(items))
+    except LLMUnavailable:
+        raise  # every model is down: pause the episode and plan again tomorrow (never cache a degraded plan)
     except Exception as exc:  # noqa: BLE001 - a failed plan falls back to pictures + big words
         log(f"storyboard plan failed for '{heading}', using simple scenes: {str(exc)[:150]}")
         raw = {}
