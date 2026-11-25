@@ -118,6 +118,45 @@ def choose_topic(state: dict) -> tuple[str, dict] | None:
     return None
 
 
+# ---------------------------------------------------------------- remakes
+def _next_remake(state: dict) -> str | None:
+    """Topics listed in production.remake are made again in the current format before any new topic.
+    Their old episodes are withdrawn first, so the old versions are never uploaded."""
+    for tid in CFG.get("production", {}).get("remake") or []:
+        t = state["topics"].get(tid)
+        if not t or t.get("remake_state") in ("done", "failed"):
+            continue
+        if t.get("remake_state") == "started" and t.get("status") == "produced":
+            t["remake_state"] = "done"  # finished by an earlier run whose state was saved late
+            continue
+        if not t.get("remake_state"):
+            for rec in state["episodes"].values():
+                if rec.get("topic_id") == tid and not rec.get("superseded") \
+                        and rec.get("status") in ("produced", "uploaded", "failed"):
+                    rec["superseded"] = True
+                    if rec.get("status") != "failed":
+                        rec["status"] = "rejected"
+                    rec.pop("approve_requested", None)
+                    if rec.get("review_issue"):
+                        try:
+                            github.comment(rec["review_issue"], "🔁 Bu bölüm yeni hızlı animasyonlu formatta baştan "
+                                           "üretilecek. Bu eski sürüm YouTube'a yüklenmeyecek.")
+                            github.close(rec["review_issue"])
+                        except Exception as exc:  # noqa: BLE001 - the state change is what matters
+                            log(f"could not update issue #{rec['review_issue']}: {exc}")
+            t["remake_state"] = "started"
+            t["attempts"] = 0
+            t.pop("paused", None)
+            t.pop("work_slug", None)
+        elif t.get("attempts", 0) >= 2:
+            t["remake_state"] = "failed"
+            log(f"remake of {tid} failed twice; skipping it")
+            continue
+        t["status"] = "in_progress"
+        return tid
+    return None
+
+
 # ---------------------------------------------------------------- produce
 def review_body(record: dict, release_url: str) -> str:
     hours = CFG["approval"]["auto_approve_hours"]
@@ -200,8 +239,12 @@ def cmd_produce(_args) -> None:
         log("no paused episode and not a production day")
         return
     picked = None
+    remake = None if paused else _next_remake(state)
     if paused:
         picked = (paused[0], {"issue": None, "remaining": 1})
+    elif remake:
+        picked = (remake, {"issue": None, "remaining": 1})
+        save_state(state)
     else:
         picked = choose_topic(state)
         save_state(state)  # choose_topic may have marked failures
@@ -236,6 +279,8 @@ def cmd_produce(_args) -> None:
     state = load_state()
     state["episodes"][record["slug"]] = record
     state["topics"][tid]["status"] = "produced"
+    if state["topics"][tid].get("remake_state") == "started":
+        state["topics"][tid]["remake_state"] = "done"
     state["recent_structures"] = (state["recent_structures"] + [record.get("structure", "")])[-10:]
     state["recent_styles"] = (state.get("recent_styles", []) + [record.get("visual_style", "painterly")])[-10:]
     save_state(state)

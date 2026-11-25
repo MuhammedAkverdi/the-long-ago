@@ -46,6 +46,18 @@ jobs:
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q -r requirements.txt
           cp state/state.json "$RUNNER_TEMP/base.json"
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          node-version: "22"
+      - name: Install HyperFrames (animated scenes renderer, open source)
+        if: steps.gate.outputs.run == 'true'
+        run: npm install -g hyperframes@0.9.91
+      - uses: actions/cache@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          path: ~/.cache/the-long-ago
+          key: tla-geo-v1
       - name: Run
         if: steps.gate.outputs.run == 'true'
         run: python -m pipeline produce
