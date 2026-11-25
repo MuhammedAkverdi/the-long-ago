@@ -74,6 +74,9 @@ script:
   episodes_per_week: 2
 
 video:
+  # "motion": hızlı animasyonlu format (her 3-5 sn yeni sahne: harita, tarih, sayaç, büyük yazı, çizgi karakter;
+  #           HyperFrames ile çizilir, GPU gerekmez). "slideshow": eski resim + yakınlaştırma formatı.
+  engine: "motion"
   width: 1920
   height: 1080
   fps: 25
@@ -109,6 +112,13 @@ video:
       simple clothing, uncluttered background with a few telling objects, gentle paper texture,
       no text, no letters, no watermark, not photorealistic
 
+motion:                             # video.engine = "motion" ayarları
+  picture_share: 0.33               # sahnelerin ~üçte biri resim (kota harcar), gerisi kodla çizilir
+  beat_min_words: 7                 # bir sahne ~1-2 cümle, ~3-6 sn
+  beat_max_words: 20
+  sound_effects: true               # sahne geçişinde hafif "whoosh", damga sesi, daktilo tıkırtısı
+  sfx_volume: 0.3
+
 # Kanalın tek tasarım dili: tüm başlık kartları, altyazılar ve kapaklar bunları kullanır.
 brand:
   ink: "#1C1A17"        # yazı / kontur
@@ -128,6 +138,8 @@ colab:                              # isteğe bağlı: Colab not defteri açıks
 
 production:
   produce_weekdays: [1, 3]         # Salı, Perşembe (0 = Pazartesi). Diğer günler yalnızca kotası biten bölüme devam edilir.
+  # Bu konular yeni formatta baştan üretilir (yeni konulardan önce). Eski sürümleri asla yüklenmez.
+  remake: ["fe45819a", "59f8716e"]  # 1. bölüm (Mısır), 2. bölüm (Murano)
 
 compilation:
   min_episodes: 3

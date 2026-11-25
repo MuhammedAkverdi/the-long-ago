@@ -40,16 +40,17 @@ def _save_png(src: pathlib.Path, out: pathlib.Path) -> bool:
     return True
 
 
-def apply(folder: pathlib.Path, slug: str, script: dict) -> int:
+def apply(folder: pathlib.Path, slug: str, script: dict, openings: bool = True) -> int:
     """Copy manual pictures into the episode folder where the generated ones would go.
-    Existing files are kept, so a resumed run does not redo it. Returns how many were placed."""
+    Existing files are kept, so a resumed run does not redo it. Returns how many were placed.
+    openings=False: only the thumbnail (the animated format draws its own opening)."""
     src = folder_for(slug)
     if src is None:
         return 0
     placed = 0
     opens = sorted(p for p in src.iterdir() if p.suffix.lower() in IMG_EXT and p.stem.lower().startswith("open"))
     slots = len(script["chapters"][0]["image_prompts"]) if script.get("chapters") else 0
-    for k, p in enumerate(opens[:slots]):
+    for k, p in enumerate(opens[:slots] if openings else []):
         out = folder / "img" / "ch00" / f"{k:03d}.png"
         if not out.exists() and _save_png(p, out):
             out.with_suffix(".qc").touch()  # hand-picked: no quality-check redraw
