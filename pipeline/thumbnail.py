@@ -16,6 +16,11 @@ FONT_CANDIDATES = [
 
 
 def _font(size: int):
+    if CFG.get("brand"):
+        from . import brand
+        path = brand.font_path("title")
+        if path:
+            return ImageFont.truetype(path, size)
     for path in FONT_CANDIDATES:
         if pathlib.Path(path).exists():
             return ImageFont.truetype(path, size)
@@ -48,7 +53,11 @@ def overlay(base: Image.Image, text: str, out: pathlib.Path, darken: float = 1.0
     img = Image.composite(Image.new("RGB", img.size, (0, 0, 0)), img, shade)
     draw = ImageDraw.Draw(img)
     text = text.upper()
-    size = 120
+    fill, stroke = (255, 236, 190), (20, 12, 4)
+    if CFG.get("brand"):
+        from . import brand
+        fill, stroke = brand.rgb("accent", "#E9A53C"), brand.rgb("ink", "#1C1A17")
+    size = 150
     while size > 50:
         font = _font(size)
         lines = _wrap(draw, text, font, 620)
@@ -57,8 +66,7 @@ def overlay(base: Image.Image, text: str, out: pathlib.Path, darken: float = 1.0
         size -= 8
     y = 360 - len(lines) * size * 0.6
     for line in lines:
-        draw.text((50, y), line, font=font, fill=(255, 236, 190), stroke_width=max(4, size // 14),
-                  stroke_fill=(20, 12, 4))
+        draw.text((50, y), line, font=font, fill=fill, stroke_width=max(4, size // 14), stroke_fill=stroke)
         y += size * 1.15
     img.save(out, "JPEG", quality=90, optimize=True)
     return out

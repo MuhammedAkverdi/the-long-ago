@@ -119,3 +119,28 @@ def schedule(video_id: str, publish_at_utc: str) -> None:
     if MOCK:
         return
     service().videos().update(part="status", body={"id": video_id, "status": _status("private", publish_at_utc)}).execute()
+
+
+def recent_comments(limit: int = 60) -> list[str]:
+    """Recent top-level viewer comments on this channel's videos (2-3 quota units). [] on any problem,
+    e.g. before uploads are enabled or when the token is missing."""
+    if MOCK:
+        return []
+    try:
+        me = service().channels().list(part="id", mine=True).execute()
+        channel_id = (me.get("items") or [{}])[0].get("id")
+        if not channel_id:
+            return []
+        resp = service().commentThreads().list(part="snippet", allThreadsRelatedToChannelId=channel_id,
+                                               maxResults=min(limit, 100), order="time",
+                                               textFormat="plainText").execute()
+        out = []
+        for item in resp.get("items", []):
+            top = item["snippet"]["topLevelComment"]["snippet"]
+            if top.get("authorChannelId", {}).get("value") == channel_id:
+                continue  # our own replies
+            out.append(" ".join(str(top.get("textDisplay", "")).split())[:300])
+        return [c for c in out if c]
+    except Exception as exc:  # noqa: BLE001 - comments only help pick topics; never block the weekly list
+        log(f"viewer comments unavailable: {str(exc)[:150]}")
+        return []

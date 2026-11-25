@@ -62,7 +62,8 @@ def pretty(iso: str) -> str:
 def cmd_topics(_args) -> None:
     state = load_state()
     past = [t["title"] for t in state["topics"].values()]
-    topics = propose(past)
+    comments = youtube.recent_comments() if api_mode() else []
+    topics = propose(past, comments)
     week = dt.date.today().isocalendar()
     lines = [
         "Merhaba! Bu haftanın video konusu önerileri aşağıda. 👇",
@@ -125,6 +126,11 @@ def review_body(record: dict, release_url: str) -> str:
              f"Doğruluk kontrolü: {record.get('fact_check', '-')}", "",
              *(["Başlık seçenekleri: " + " · ".join(f"`{t}`" for t in record["title_options"]), ""]
                if record.get("title_options") else []),
+             *([f"Görsel stil: `{record['visual_style']}` · Arşiv görseli: {record.get('archival', 0)}", ""]
+               if record.get("visual_style") else []),
+             *(["Açılış turnuvasının en iyi 3 adayı (videoda 1. kullanıldı):"]
+               + [f"{i + 1}. ({h.get('score', '-')}/10) {h.get('text', '')}" for i, h in enumerate(record["hook_options"])]
+               + [""] if record.get("hook_options") else []),
              f"İzlemek için (telefondan da açılır): {release_url}", "",
              ("**Doğruluk kontrolü çalışmadığı için bu video otomatik onaylanmaz; `/onay` yazmanız gerekir.**"
               if str(record.get("fact_check", "")).startswith("ÇALIŞMADI") else
@@ -213,7 +219,8 @@ def cmd_produce(_args) -> None:
     t.setdefault("work_slug", f"{dt.date.today():%Y%m%d}-{tid}")
     save_state(state)
     try:
-        record = produce(t["title"], state["recent_structures"], slug=t["work_slug"])
+        record = produce(t["title"], state["recent_structures"], slug=t["work_slug"],
+                         recent_styles=state.get("recent_styles", []))
     except (images.QuotaPause, LLMUnavailable) as exc:
         state = load_state()
         t = state["topics"][tid]
@@ -230,6 +237,7 @@ def cmd_produce(_args) -> None:
     state["episodes"][record["slug"]] = record
     state["topics"][tid]["status"] = "produced"
     state["recent_structures"] = (state["recent_structures"] + [record.get("structure", "")])[-10:]
+    state["recent_styles"] = (state.get("recent_styles", []) + [record.get("visual_style", "painterly")])[-10:]
     save_state(state)
     _finish(record, WORK / record["slug"])
     shutil.rmtree(WORK / record["slug"], ignore_errors=True)  # delivered: keep the cross-run cache small
@@ -428,6 +436,12 @@ def cmd_compile(_args) -> None:
         starts.append(t)
         t += duration(sub / "final.mp4")
         parts.append(sub / "final.mp4")
+    tail_min = float(cc.get("ambient_tail_minutes", 0) or 0)
+    if tail_min > 0:  # sleep channels keep a long quiet tail after the last story (more watch time, no cut-off)
+        from .render import ambient_tail
+        starts.append(t)
+        parts.append(ambient_tail(folder / "thumb_raw.png", tail_min, folder / "tail.mp4"))
+        t += duration(parts[-1])
     listfile = folder / "list.txt"
     listfile.write_text("".join(f"file '{p.resolve()}'\n" for p in parts))
     final = folder / "final.mp4"
@@ -439,6 +453,7 @@ def cmd_compile(_args) -> None:
     desc = "\n".join(["Settle in, dim the lights and drift back through the lives of ordinary people in the past. "
                       "This calm compilation gathers several full episodes of The Long Ago.", "", "Episodes:"]
                      + [f"{ts(s)} {e['title']}" for s, e in zip(starts, chosen)]
+                     + ([f"{ts(starts[-1])} Soft rain to fall asleep"] if len(starts) > len(chosen) else [])
                      + ["", "Sources for each episode are listed in the original videos.", "", AI_NOTE, "", "#history #sleep #thelongago"])
     record = {"slug": slug, "type": "compilation", "title": title, "minutes": round(t / 60, 1), "description": desc,
               "tags": ["history for sleep", "sleep documentary", "boring history"] + CFG["channel"]["default_tags"],

@@ -72,6 +72,14 @@ def shots(segments: list[tuple[pathlib.Path, float, float]], groups: list[int],
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
 
 
+def _title_style() -> tuple[str, str, str]:
+    """(font file, text colour, border colour) for chapter titles: the brand's when configured."""
+    if CFG.get("brand"):
+        from . import brand
+        return brand.font_path("title") or FONT, brand.ffcolor("paper", "#F6E7C1"), brand.ffcolor("ink", "#1A1208")
+    return FONT, "0xF6E7C1", "0x1A1208"
+
+
 def _enc() -> list[str]:
     v = CFG["video"]
     return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(v["crf"]), "-maxrate", str(v.get("maxrate", "6M")),
@@ -105,12 +113,13 @@ def _render_group(clips: list[pathlib.Path], frames: list[int], xf: int, out: pa
         chain.append(f"{label}[{k}:v]xfade=transition=fade:duration={xf / fps:.4f}:offset={offset / fps:.4f}[x{k}]")
         label = f"[x{k}]"
     post = []
-    if title and pathlib.Path(FONT).exists():
+    font, fg, border = _title_style()
+    if title and pathlib.Path(font).exists():
         tf = out.with_suffix(".title.txt")
         tf.write_text(title, encoding="utf-8")
         alpha = "if(lt(t,0.6),0,if(lt(t,1.6),t-0.6,if(lt(t,4.6),1,if(lt(t,5.6),5.6-t,0))))"
-        post.append(f"drawtext=fontfile={FONT}:textfile={tf.name}:fontsize=58:fontcolor=0xF6E7C1:"
-                    f"borderw=3:bordercolor=0x1A1208:x=90:y=h-200:expansion=none:alpha='{alpha}'")
+        post.append(f"drawtext=fontfile='{font}':textfile={tf.name}:fontsize=64:fontcolor={fg}:"
+                    f"borderw=4:bordercolor={border}:x=90:y=h-210:expansion=none:alpha='{alpha}'")
     if fade_in:
         post.append("fade=t=in:st=0:d=0.6")
     if fade_out:
@@ -149,7 +158,9 @@ def slideshow(segments: list[tuple[pathlib.Path, float, float]], out: pathlib.Pa
         for j, i in enumerate(idx):
             img = segments[i][0]
             pool = range(N_VARIANTS) if img != last_img else [v for v in range(N_VARIANTS) if (v >= 4) != (last_variant >= 4)]
-            variant = rnd.choice([v for v in pool if v != last_variant])
+            if img.parent.name == "cards":  # word cards: centred zoom only, so the word is never cropped
+                pool = [0, 1]
+            variant = rnd.choice([v for v in pool if v != last_variant] or list(pool))
             last_variant, last_img = variant, img
             clip = clip_dir / f"{i:04d}.mp4"
             ken_burns(img, fr[j] + (xf if j < len(idx) - 1 else 0), clip, w, h, variant)
@@ -190,14 +201,15 @@ def pick_music() -> pathlib.Path | None:
 
 
 def mux(video: pathlib.Path, narration: pathlib.Path, out: pathlib.Path, music: bool = True,
-        chapter_starts: list[float] | None = None) -> None:
+        chapter_starts: list[float] | None = None, reveal_times: list[float] | None = None) -> None:
     """Video + narration + a quiet music bed (a file from assets/music if present, else a synthesised one).
     The bed is also ducked a little further whenever the narrator speaks."""
     track, premixed = (pick_music(), False) if music else (None, False)
     if music and track is None and CFG["video"].get("generated_music", True):
         from .music import make_bed
         try:
-            track = make_bed(duration(narration), chapter_starts or [], out.parent / "_music.wav", seed=str(out.parent))
+            track = make_bed(duration(narration), chapter_starts or [], out.parent / "_music.wav", seed=str(out.parent),
+                             reveals=reveal_times or [])
             premixed = True
         except Exception as exc:  # noqa: BLE001 - music is optional, never lose the episode over it
             log(f"music bed failed, continuing without music: {str(exc)[:200]}")
@@ -247,15 +259,78 @@ def cues_for(text: str, start: float, dur: float, max_words: int = 12) -> list[t
     return cues
 
 
+def cues_lines(text: str, start: float, dur: float, max_chars: int = 35) -> list[tuple[float, float, str]]:
+    """One-line cues of at most `max_chars` characters, broken at sentence and clause ends where possible."""
+    pieces: list[str] = []
+    for clause in re.split(r"(?<=[.!?;:,])\s+", text.strip()):
+        cur = ""
+        for word in clause.split():
+            if cur and len(cur) + 1 + len(word) > max_chars:
+                pieces.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        if cur:
+            pieces.append(cur)
+    total = sum(len(p) for p in pieces) or 1
+    cues, t = [], start
+    for p in pieces:
+        d = dur * len(p) / total
+        cues.append((t, t + d, p))
+        t += d
+    return cues
+
+
 def write_srt(cues: list[tuple[float, float, str]], out: pathlib.Path) -> None:
     out.write_text("\n".join(f"{i}\n{_fmt(a)} --> {_fmt(b)}\n{txt}\n" for i, (a, b, txt) in enumerate(cues, 1)),
                    encoding="utf-8")
 
 
+def _ass_colour(hex_rgb: str) -> str:
+    h = hex_rgb.lstrip("#")
+    return f"&H00{h[4:6]}{h[2:4]}{h[0:2]}".upper()
+
+
 def burn_subtitles(video: pathlib.Path, srt: pathlib.Path, out: pathlib.Path) -> None:
     style = ("FontName=DejaVu Sans,FontSize=13,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
              "BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=70")
+    extra = ""
+    if CFG.get("brand"):  # the channel's font and accent colour, one bold line
+        from . import brand
+        fp = brand.font_path("title")
+        if fp and not fp.startswith("/usr/share"):
+            from PIL import ImageFont
+            family = ImageFont.truetype(fp, 20).getname()[0]
+            tmp_fonts = srt.parent / "_fonts"
+            tmp_fonts.mkdir(exist_ok=True)
+            (tmp_fonts / pathlib.Path(fp).name).write_bytes(pathlib.Path(fp).read_bytes())
+            extra = ":fontsdir=_fonts"
+            style = (f"FontName={family},FontSize=14,PrimaryColour={_ass_colour(brand.color('accent', '#E9A53C'))},"
+                     f"OutlineColour={_ass_colour(brand.color('ink', '#1C1A17'))},BorderStyle=1,Outline=3,"
+                     "Shadow=1,BackColour=&H80000000,Alignment=2,MarginV=110")
     # run inside the srt's folder so the filter path needs no escaping
-    run(["ffmpeg", "-y", "-i", str(video.resolve()), "-vf", f"subtitles={srt.name}:force_style='{style}'",
+    run(["ffmpeg", "-y", "-i", str(video.resolve()), "-vf", f"subtitles={srt.name}{extra}:force_style='{style}'",
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "copy",
          "-movflags", "+faststart", str(out.resolve())], cwd=srt.parent)
+
+
+def ambient_tail(img: pathlib.Path, minutes: float, out: pathlib.Path) -> pathlib.Path:
+    """A quiet rain-like tail for sleep compilations: one dim still picture over soft synthesized
+    noise (no samples, so nothing to license). Encoded like the episodes so it concatenates by copy."""
+    v = CFG["video"]
+    secs = max(60, int(minutes * 60))
+    w, h, fps = v["width"], v["height"], v["fps"]
+    audio = (f"anoisesrc=color=pink:amplitude=0.5:sample_rate=44100:duration={secs},"
+             "highpass=f=300,lowpass=f=5000,volume=0.55[rain];"
+             f"anoisesrc=color=brown:amplitude=0.5:sample_rate=44100:duration={secs},"
+             "lowpass=f=200,volume=0.35[rumble];"
+             f"[rain][rumble]amix=inputs=2:normalize=0,afade=t=in:d=8,afade=t=out:st={secs - 30}:d=30,"
+             "aformat=channel_layouts=stereo[a]")
+    video = (f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,"
+             f"eq=brightness=-0.18:saturation=0.7,fps={fps},format=yuv420p,"
+             f"fade=t=in:d=3,fade=t=out:st={secs - 10}:d=10[v]")
+    run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(fps), "-t", str(secs), "-i", str(img),
+         "-filter_complex", f"{video};{audio}", "-map", "[v]", "-map", "[a]", "-t", str(secs),
+         *_enc(), "-tune", "stillimage", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+         "-movflags", "+faststart", str(out)])
+    return out
