@@ -67,7 +67,12 @@ def split_beats(text: str, min_words: int = 7, max_words: int = 20) -> list[str]
 
 
 def _s(v, n: int) -> str:
-    return " ".join(str(v or "").split())[:n]
+    """Collapse whitespace and cap at n chars without cutting a word in half."""
+    s = " ".join(str(v or "").split())
+    if len(s) <= n:
+        return s
+    cut = s[:n + 1].rsplit(" ", 1)[0].rstrip(" ,;:-(/\u2014\u2013") if " " in s[:n + 1] else ""
+    return cut if cut and len(cut) >= n // 2 else s[:n]
 
 
 def _num(v) -> float | None:
@@ -168,7 +173,7 @@ def fallback_scene(beat: str, prev: str | None) -> dict:
         return {"t": "picture", "label": ""}
     words = [w.strip(".,;:!?\"'()") for w in beat.split()]
     key = [w for w in words if len(w) > 3][:3] or words[:2]
-    return {"t": "kinetic", "lines": [" ".join(key).upper()[:22]], "accent": 0}
+    return {"t": "kinetic", "lines": [_s(" ".join(key).upper(), 22)], "accent": 0}
 
 
 def plan_chapter(topic: str, heading: str, beats: list[str], picture_share: float) -> list[dict]:
